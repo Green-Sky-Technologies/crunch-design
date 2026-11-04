@@ -103,3 +103,62 @@ export function snapResizeRect(
   }
   return { rect, lines };
 }
+
+export interface Distance {
+  /** The gap as a thin world rect (horizontal or vertical). */
+  line: Rect;
+  /** Gap size in px. */
+  value: number;
+}
+
+const overlaps = (a0: number, a1: number, b0: number, b1: number) => a0 < b1 && b0 < a1;
+const containsRect = (o: Rect, r: Rect) =>
+  o.x <= r.x && o.y <= r.y && o.x + o.width >= r.x + r.width && o.y + o.height >= r.y + r.height;
+
+/**
+ * Spacing guides (Story 3.5): the gap from a rect to its nearest neighbour on each side (among
+ * rects that overlap it on the other axis), so you can see and match distances while placing or
+ * resizing. Containers that enclose the rect (its parent) are ignored.
+ */
+export function spacingGuides(r: Rect, others: readonly Rect[]): Distance[] {
+  const out: Distance[] = [];
+  const near = (pick: (o: Rect) => number | null): [Rect, number] | null => {
+    let best: [Rect, number] | null = null;
+    for (const o of others) {
+      if (containsRect(o, r)) continue;
+      const gap = pick(o);
+      if (gap !== null && gap >= 0 && (!best || gap < best[1])) best = [o, gap];
+    }
+    return best;
+  };
+  const vOverlap = (o: Rect) => overlaps(o.y, o.y + o.height, r.y, r.y + r.height);
+  const hOverlap = (o: Rect) => overlaps(o.x, o.x + o.width, r.x, r.x + r.width);
+  const midY = (o: Rect) => (Math.max(o.y, r.y) + Math.min(o.y + o.height, r.y + r.height)) / 2;
+  const midX = (o: Rect) => (Math.max(o.x, r.x) + Math.min(o.x + o.width, r.x + r.width)) / 2;
+
+  const left = near((o) => (vOverlap(o) ? r.x - (o.x + o.width) : null));
+  if (left)
+    out.push({
+      line: { x: r.x - left[1], y: midY(left[0]), width: left[1], height: 0 },
+      value: left[1],
+    });
+  const right = near((o) => (vOverlap(o) ? o.x - (r.x + r.width) : null));
+  if (right)
+    out.push({
+      line: { x: r.x + r.width, y: midY(right[0]), width: right[1], height: 0 },
+      value: right[1],
+    });
+  const above = near((o) => (hOverlap(o) ? r.y - (o.y + o.height) : null));
+  if (above)
+    out.push({
+      line: { x: midX(above[0]), y: r.y - above[1], width: 0, height: above[1] },
+      value: above[1],
+    });
+  const below = near((o) => (hOverlap(o) ? o.y - (r.y + r.height) : null));
+  if (below)
+    out.push({
+      line: { x: midX(below[0]), y: r.y + r.height, width: 0, height: below[1] },
+      value: below[1],
+    });
+  return out.filter((d) => d.value > 0).map((d) => ({ ...d, value: Math.round(d.value) }));
+}

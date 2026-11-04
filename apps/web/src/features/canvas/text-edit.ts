@@ -61,6 +61,13 @@ export function readEditedText(el: Node): string {
 }
 
 const RICH_KEYS = new Set(['b', 'i', 'u', 'k']);
+/** Input types that would insert markup; plain-text equivalents are handled by our listeners. */
+const RICH_INPUT = new Set([
+  'insertFromDrop',
+  'insertFromPasteAsQuotation',
+  'insertLink',
+  'insertHTML',
+]);
 
 /** Begin editing. Returns a function that cancels the edit, or null if it can't start. */
 export function startTextEdit(
@@ -106,6 +113,8 @@ export function startTextEdit(
     target.removeEventListener('keyup', stop);
     target.removeEventListener('keypress', stop);
     target.removeEventListener('paste', onPaste);
+    target.removeEventListener('drop', onDrop);
+    target.removeEventListener('beforeinput', onBeforeInput);
     target.removeEventListener('blur', onBlur);
     target.removeEventListener('compositionstart', onCompStart);
     target.removeEventListener('compositionend', onCompEnd);
@@ -144,9 +153,20 @@ export function startTextEdit(
   };
   const onPaste = (e: ClipboardEvent) => {
     e.preventDefault();
-    const text = e.clipboardData?.getData('text/plain') ?? '';
+    insertPlain(e.clipboardData?.getData('text/plain') ?? '');
+  };
+  const insertPlain = (text: string) => {
     // execCommand keeps the browser's own undo stack for the edit session.
     if (!document.execCommand?.('insertText', false, text)) target.textContent += text;
+  };
+  // Drops insert plain text only (the contentEditable='true' fallback would accept rich HTML).
+  const onDrop = (e: DragEvent) => {
+    e.preventDefault();
+    insertPlain(e.dataTransfer?.getData('text/plain') ?? '');
+  };
+  // Block rich edits the browser would otherwise perform (bold/italic/links, rich drops/pastes).
+  const onBeforeInput = (e: InputEvent) => {
+    if (e.inputType.startsWith('format') || RICH_INPUT.has(e.inputType)) e.preventDefault();
   };
   const onBlur = () => finish(true);
   const onCompStart = () => (composing = true);
@@ -156,6 +176,8 @@ export function startTextEdit(
   target.addEventListener('keyup', stop);
   target.addEventListener('keypress', stop);
   target.addEventListener('paste', onPaste);
+  target.addEventListener('drop', onDrop);
+  target.addEventListener('beforeinput', onBeforeInput);
   target.addEventListener('blur', onBlur);
   target.addEventListener('compositionstart', onCompStart);
   target.addEventListener('compositionend', onCompEnd);

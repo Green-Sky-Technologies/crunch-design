@@ -8,7 +8,7 @@
  * The camera changes on every pan/zoom frame. The world layer applies it by subscribing and
  * writing `transform` directly, so frames never re-render for camera moves (ADR 0001).
  */
-import { frameBreakpoint, type Camera, type Rect } from '@crunch/canvas';
+import { frameBreakpoint, type Camera, type Distance, type Rect } from '@crunch/canvas';
 import type { Breakpoint, DesignSystemSpec, Frame } from '@crunch/doc-model';
 import { useStore } from 'zustand';
 import { createStore, type StoreApi } from 'zustand/vanilla';
@@ -48,7 +48,12 @@ export interface CanvasState {
   /** Drop indicator during a flow drag, in world coordinates. */
   drop: { line: Rect; container: Rect } | null;
   /** Smart guides during resize/absolute moves, in world coordinates. */
-  guides: { lines: Rect[]; label?: { x: number; y: number; text: string } } | null;
+  guides: {
+    lines: Rect[];
+    /** Spacing guides: gaps to the nearest neighbours. */
+    distances?: Distance[];
+    label?: { x: number; y: number; text: string };
+  } | null;
   setDrop(d: CanvasState['drop']): void;
   setGuides(g: CanvasState['guides']): void;
   setCamera(c: Camera): void;

@@ -17,6 +17,7 @@ import {
   moveOps,
   selectableAt,
   snapMoveRect,
+  spacingGuides,
   subtreeSet,
   toFlowOps,
   topLevelSelection,
@@ -195,7 +196,10 @@ export function startNodeDrag(ctx: DragCtx, down: PointerEvent, hit: Hit): boole
             };
             const s = snapMoveRect(moved, others, SNAP_PX / z);
             delta = { x: s.rect.x - startBounds.x, y: s.rect.y - startBounds.y };
-            canvas.getState().setGuides(s.lines.length ? { lines: s.lines } : null);
+            const distances = spacingGuides(s.rect, others);
+            canvas
+              .getState()
+              .setGuides(s.lines.length || distances.length ? { lines: s.lines, distances } : null);
           }
           delta = { x: Math.round(delta.x), y: Math.round(delta.y) };
           for (const el of draggedEls)

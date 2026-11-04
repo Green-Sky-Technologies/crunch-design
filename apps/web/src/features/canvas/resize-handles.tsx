@@ -12,6 +12,7 @@ import {
   isLocked,
   resizeRect,
   snapResizeRect,
+  spacingGuides,
   worldRectToScreen,
   type Handle,
 } from '@crunch/canvas';
@@ -81,6 +82,7 @@ export function ResizeHandles() {
     const others = snapTargets(vp, cam, docStore.getState().doc, frameId, [node.id]);
     const absolute = node.positioning === 'absolute';
     let next = start;
+    let axes = { w: false, h: false };
     const clear = () => {
       for (const p of PREVIEW_PROPS) el.style.removeProperty(p);
       canvas.getState().setGuides(null);
@@ -99,12 +101,17 @@ export function ResizeHandles() {
           lines = s.lines;
         }
         next = { x: rr.x, y: rr.y, width: Math.round(rr.width), height: Math.round(rr.height) };
+        // Shift on a side handle keeps the aspect ratio, so the other axis changes too.
+        axes = {
+          w: h.includes('e') || h.includes('w') || ev.shiftKey,
+          h: h.includes('n') || h.includes('s') || ev.shiftKey,
+        };
         const set = (p: string, v: string) => el.style.setProperty(p, v, 'important');
-        if (h.includes('e') || h.includes('w')) {
+        if (axes.w) {
           set('width', `${next.width}px`);
           set('max-width', 'none');
         }
-        if (h.includes('n') || h.includes('s')) {
+        if (axes.h) {
           set('height', `${next.height}px`);
           set('max-height', 'none');
         }
@@ -116,6 +123,7 @@ export function ResizeHandles() {
         }
         canvas.getState().setGuides({
           lines,
+          distances: spacingGuides(next, others),
           label: {
             x: next.x + next.width / 2,
             y: next.y + next.height,
@@ -134,7 +142,7 @@ export function ResizeHandles() {
           ops.push({ op: 'setStyle', id: node.id, breakpoint: bp, prop, value });
         // A max-width/height smaller than the new size would clamp it: lift it at this breakpoint.
         const clamps = (max: string, v: number) => max !== 'none' && parseFloat(max) < v;
-        if (h.includes('e') || h.includes('w')) {
+        if (axes.w) {
           set('width', next.width);
           if (clamps(maxW, next.width))
             ops.push({
@@ -145,7 +153,7 @@ export function ResizeHandles() {
               value: 'none',
             });
         }
-        if (h.includes('n') || h.includes('s')) {
+        if (axes.h) {
           set('height', next.height);
           if (clamps(maxH, next.height))
             ops.push({
@@ -231,6 +239,40 @@ export function GuidesOverlay() {
               background: '#f43f5e',
             }}
           />
+        );
+      })}
+      {guides.distances?.map((d, i) => {
+        const r = worldRectToScreen(camera, d.line);
+        const vertical = d.line.width === 0;
+        return (
+          <div key={`d${i}`} data-distance={d.value}>
+            <div
+              style={{
+                position: 'absolute',
+                left: r.x,
+                top: r.y,
+                width: Math.max(1, r.width),
+                height: Math.max(1, r.height),
+                borderLeft: vertical ? '1px dashed #f43f5e' : undefined,
+                borderTop: vertical ? undefined : '1px dashed #f43f5e',
+              }}
+            />
+            <span
+              style={{
+                position: 'absolute',
+                left: r.x + r.width / 2,
+                top: r.y + r.height / 2,
+                transform: 'translate(-50%, -50%)',
+                fontSize: 10,
+                padding: '0 3px',
+                borderRadius: 3,
+                background: '#f43f5e',
+                color: '#fff',
+              }}
+            >
+              {d.value}
+            </span>
+          </div>
         );
       })}
       {guides.label && (

@@ -24,8 +24,6 @@ export interface ApplyMeta {
   coalesceKey?: string;
 }
 
-let gestureSeq = 0;
-
 type FieldProps = {
   prop: StylePropName;
   state: PropState;
@@ -38,6 +36,8 @@ type FieldProps = {
   tokens: TokenOption[];
   readOnly: boolean;
   onApply(prop: StylePropName, value: unknown, meta?: ApplyMeta): boolean;
+  /** Live preview on the canvas while scrubbing; null clears it. */
+  onPreview?(prop: StylePropName, value: unknown): void;
 };
 
 /**
@@ -54,6 +54,7 @@ function sameField(a: FieldProps, b: FieldProps): boolean {
     a.readOnly === b.readOnly &&
     a.tokens === b.tokens &&
     a.onApply === b.onApply &&
+    a.onPreview === b.onPreview &&
     a.state.from === b.state.from &&
     a.state.setHere === b.state.setHere &&
     a.state.inherited === b.state.inherited &&
@@ -73,6 +74,7 @@ export const StyleField = memo(function StyleField({
   tokens,
   readOnly,
   onApply,
+  onPreview,
 }: FieldProps) {
   const def = STYLE_PROPS[prop];
   const id = useId();
@@ -117,11 +119,23 @@ export const StyleField = memo(function StyleField({
   const onScrub = (e: React.PointerEvent) => {
     if (!numeric || readOnly || e.button !== 0) return;
     const start = state.value;
-    const key = `scrub:${prop}:${++gestureSeq}`;
+    let last: unknown = null;
     startGesture(e, {
       onMove: (ev, dx) => {
         const next = nudge(prop, start, Math.round(dx / 2) * (ev.shiftKey ? 10 : 1));
-        if (next !== null) onApply(prop, next, { coalesceKey: key });
+        if (next === null) return;
+        last = next;
+        setDraft(formatStyleValue(next));
+        onPreview?.(prop, next);
+      },
+      onEnd: () => {
+        onPreview?.(prop, null);
+        setDraft(null);
+        if (last !== null) onApply(prop, last); // one op per scrub
+      },
+      onCancel: () => {
+        onPreview?.(prop, null);
+        setDraft(null);
       },
     });
   };

@@ -25,8 +25,10 @@ import {
   type Frame,
   type Node,
   type StylePropName,
+  type StyleProps,
 } from '@crunch/doc-model';
-import { useCallback, useMemo, useState } from 'react';
+import { declarations } from '@crunch/renderer';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useDocStore, useDocStoreApi, useEditor } from '../doc-store';
 import { inspectorBreakpoint, useCanvas, useCanvasStoreApi } from './canvas-store';
@@ -36,6 +38,8 @@ import { positioningOps } from './drag';
 import { StyleField, type ApplyMeta } from './style-field';
 
 const GROUPS = inspectorGroups();
+const BLOCK_PARENT = { display: 'block', direction: 'column' } as const;
+const NO_FLAGS = { absolute: false, isBox: false, hidden: false };
 const DEFAULT_OPEN = new Set(['layout', 'size', 'spacing', 'typography', 'fill', 'border']);
 
 function Section({
@@ -316,6 +320,30 @@ function NodeInspector({ ids, frame }: { ids: string[]; frame: Frame | undefined
     [docStore, idsKey, bp],
   );
 
+  /**
+   * Scrub preview: the value is shown on the live elements (same CSS the renderer emits, as
+   * inline !important) and committed as one op on release, so a scrub is always one undo step no
+   * matter how long it's held.
+   */
+  const previewed = useRef(new Map<HTMLElement, string[]>());
+  const onPreview = useCallback(
+    (prop: StylePropName, value: unknown) => {
+      for (const [el, props] of previewed.current)
+        for (const p of props) el.style.removeProperty(p);
+      previewed.current.clear();
+      if (value === null) return;
+      const index = frameIndex(docStore.getState().doc);
+      const decls = declarations({ [prop]: value } as StyleProps, BLOCK_PARENT, NO_FLAGS);
+      for (const id of idsKey.split(',')) {
+        const el = nodeElement(document, index.get(id) ?? '', id);
+        if (!el) continue;
+        for (const [k, v] of decls) el.style.setProperty(k, v, 'important');
+        previewed.current.set(el, [...decls.keys()]);
+      }
+    },
+    [docStore, idsKey],
+  );
+
   if (!nodes.length) return null;
   const primary = nodes[0]!;
   const doc = docStore.getState().doc;
@@ -384,6 +412,7 @@ function NodeInspector({ ids, frame }: { ids: string[]; frame: Frame | undefined
                 tokens={tokens.get(p)!}
                 readOnly={editBlocked}
                 onApply={onApply}
+                onPreview={onPreview}
               />
             ))}
           </Section>

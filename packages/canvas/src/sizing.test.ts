@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { resizeRect, sizingMode, sizingToTailwind } from './sizing';
-import { snapMoveRect, snapResizeRect } from './snap';
+import { snapMoveRect, snapResizeRect, spacingGuides } from './snap';
 
 const row = { display: 'flex', direction: 'row' as const };
 const col = { display: 'flex', direction: 'column' as const };
@@ -39,6 +39,23 @@ describe('sizing', () => {
     expect(resizeRect(r, 'se', 100, 0, true)).toEqual({ x: 10, y: 10, width: 200, height: 100 });
     expect(resizeRect(r, 'e', -500, 0).width).toBe(1);
     expect(resizeRect(r, 'w', 500, 0)).toMatchObject({ width: 1 });
+  });
+});
+
+describe('spacing guides', () => {
+  it('measures the gap to the nearest neighbour on each side, ignoring the parent', () => {
+    const r = { x: 100, y: 100, width: 50, height: 20 };
+    const parent = { x: 0, y: 0, width: 500, height: 500 };
+    const left = { x: 20, y: 90, width: 60, height: 40 }; // gap 20
+    const fartherLeft = { x: 0, y: 100, width: 10, height: 20 }; // gap 90
+    const below = { x: 110, y: 150, width: 20, height: 20 }; // gap 30
+    const unrelated = { x: 300, y: 300, width: 10, height: 10 }; // no overlap on either axis
+    const d = spacingGuides(r, [parent, left, fartherLeft, below, unrelated]);
+    expect(d.map((x) => x.value).sort((a, b) => a - b)).toEqual([20, 30]);
+    const h = d.find((x) => x.value === 20)!;
+    expect(h.line).toMatchObject({ x: 80, width: 20, height: 0 });
+    const v = d.find((x) => x.value === 30)!;
+    expect(v.line).toMatchObject({ y: 120, height: 30, width: 0 });
   });
 });
 
