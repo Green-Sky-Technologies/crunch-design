@@ -43,10 +43,13 @@ pnpm dev                       # http://localhost:3000
    Run `clerk auth login` later to claim the app into your Clerk account.
    Or create an app at dashboard.clerk.com and put `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and
    `CLERK_SECRET_KEY` in `.env.local` yourself.
-2. **Enable Organizations** with membership **required** (workspaces are Clerk orgs).
-3. **Roles** (Organizations → Roles & Permissions): add custom roles `org:editor` and `org:viewer`
-   next to the built-in `org:admin`, and make `org:viewer` the default role for invitations.
-   `org:member` is treated as editor. The mapping lives in `packages/authz`.
+2. **Organizations and roles:** after `npx clerk@latest auth login`, run `scripts/clerk-setup.sh`
+   (or `scripts/clerk-setup.sh prod`). It turns on Organizations (workspaces) with slugs and forced
+   selection, creates the `org:editor` and `org:viewer` roles next to `org:admin`, and makes
+   `org:viewer` the default for new members. It's safe to re-run. `org:member` is treated as
+   editor; the mapping lives in `packages/authz`.
+3. (Dev instances cap organizations at 5 members by default; raise `max_allowed_memberships`
+   with `clerk enable orgs --max-members <n>` if you need more.)
 4. **Webhook** (optional locally, required in production): endpoint `/api/webhooks/clerk`; events
    `user.*`, `organization.*`, `organizationMembership.*`; put the signing secret in
    `CLERK_WEBHOOK_SIGNING_SECRET`. Without it, workspaces and members are still mirrored lazily on
