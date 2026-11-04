@@ -8,6 +8,13 @@
       "when": 1793756350502,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1793757487453,
+      "tag": "0001_epics_2_8",
+      "breakpoints": true
     }
   ]
 }
