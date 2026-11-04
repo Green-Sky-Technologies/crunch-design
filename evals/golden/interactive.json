@@ -1,0 +1,80 @@
+[
+  {
+    "id": "button-larger-scoped",
+    "description": "Ask-agent on the hero CTA: 'make this button larger' patches only that node (Story 5.4 AC, 5.7).",
+    "fixture": "landing",
+    "prompt": "Make this button larger.",
+    "scopeNodeId": "n_herocta001",
+    "expect": {
+      "touchWithin": ["n_herocta001"],
+      "mustTouch": ["n_herocta001"],
+      "maxTouched": 1,
+      "jobSuggestion": null,
+      "lintClean": true,
+      "maxOutputTokens": 3000,
+      "maxIterations": 6
+    }
+  },
+  {
+    "id": "headline-copy",
+    "description": "Rewrite the selected headline: one setProps on one node.",
+    "fixture": "landing",
+    "prompt": "Change this headline to 'Design at the speed of thought'.",
+    "selection": ["n_herotitle1"],
+    "expect": {
+      "touchWithin": ["n_herotitle1"],
+      "mustTouch": ["n_herotitle1"],
+      "maxTouched": 1,
+      "jobSuggestion": null,
+      "maxOutputTokens": 2000
+    }
+  },
+  {
+    "id": "feature-cards-spacing",
+    "description": "Tighten spacing in the features grid: edits stay inside the features section and use tokens.",
+    "fixture": "landing",
+    "prompt": "Tighten the spacing in the features section a bit.",
+    "selection": ["n_features01"],
+    "expect": {
+      "touchWithin": ["n_features01"],
+      "maxTouched": 4,
+      "lintClean": true,
+      "jobSuggestion": null,
+      "maxOutputTokens": 4000
+    }
+  },
+  {
+    "id": "density-slider",
+    "description": "An adjustable request gets a slider instead of a one-off edit (Story 5.8).",
+    "fixture": "landing",
+    "prompt": "Give me a control to adjust how dense the feature cards are.",
+    "selection": ["n_features01"],
+    "expect": {
+      "touchWithin": ["n_features01"],
+      "jobSuggestion": null,
+      "maxOutputTokens": 4000
+    }
+  },
+  {
+    "id": "pricing-page-offers-job",
+    "description": "A whole new page is too big for the interactive path: the agent offers a generation job and edits nothing (Story 5.4 AC).",
+    "fixture": "landing",
+    "prompt": "Now add a full pricing page with three tiers and an FAQ.",
+    "expect": {
+      "noEdits": true,
+      "jobSuggestion": "generate",
+      "maxOutputTokens": 1500
+    }
+  },
+  {
+    "id": "alternatives-offers-job",
+    "description": "Several alternatives are a job, not a quick edit.",
+    "fixture": "landing",
+    "prompt": "What would this page look like with a completely different layout? I'd like to compare a few.",
+    "expect": {
+      "noEdits": true,
+      "jobSuggestion": "alternatives",
+      "maxOutputTokens": 1500
+    }
+  }
+]

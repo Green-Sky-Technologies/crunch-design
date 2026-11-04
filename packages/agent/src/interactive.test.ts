@@ -9,38 +9,9 @@ import {
   prefixBytes,
   runAgentTurn,
   turnText,
-  type ModelGateway,
 } from './index';
 
-type Block = Anthropic.ContentBlock;
-const text = (t: string) => ({ type: 'text', text: t, citations: null }) as Block;
-const toolUse = (id: string, name: string, input: unknown) =>
-  ({ type: 'tool_use', id, name, input }) as Block;
-
-/** A gateway that replays scripted responses and records requests. */
-export function scriptedGateway(script: { content: Block[]; stop?: Anthropic.StopReason }[]) {
-  const requests: Parameters<ModelGateway>[0][] = [];
-  let i = 0;
-  const gateway: ModelGateway = async (params, opts) => {
-    requests.push(structuredClone(params));
-    const r = script[Math.min(i++, script.length - 1)]!;
-    r.content.forEach((b, index) => {
-      opts.onEvent?.({ type: 'content_block_start', index, content_block: b } as never);
-    });
-    return {
-      id: `msg_${i}`,
-      type: 'message',
-      role: 'assistant',
-      model: params.model,
-      content: r.content,
-      stop_reason:
-        r.stop ?? (r.content.some((b) => b.type === 'tool_use') ? 'tool_use' : 'end_turn'),
-      stop_sequence: null,
-      usage: { input_tokens: 10, output_tokens: 5 },
-    } as unknown as Anthropic.Message;
-  };
-  return { gateway, requests };
-}
+import { scriptedGateway, text, toolUse } from './evals/scripted';
 
 const ds = starterDesignSystem();
 const userTurn = (t: string): Anthropic.MessageParam => ({
