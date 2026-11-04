@@ -23,6 +23,7 @@ import {
 import { sanitizeSvg } from '@crunch/renderer';
 import { z } from 'zod';
 import { commitTransaction, ConflictError, getDoc } from './design-docs';
+import { defaultImageUploader, storeImportImages, type ImageUploader } from './figma/assets';
 import { loadFigmaToken } from './figma/credentials';
 import { FigmaRest, parseFigmaUrl, type FigmaFetch } from './figma/rest';
 import type { importRequest, pushPlanRequest, pushResultRequest } from './figma/schemas';
@@ -200,9 +201,15 @@ export async function importFigmaNodes(
   actor: Actor,
   projectId: string,
   input: ImportInput,
-  opts: { dryRun?: boolean } = {},
+  opts: { dryRun?: boolean; uploader?: ImageUploader | null } = {},
 ): Promise<ImportResult> {
   assertCan(actor.role, opts.dryRun ? 'project:read' : 'design:edit');
+  // Dry runs (previews, viewers) never write to asset storage.
+  const uploader = opts.dryRun
+    ? null
+    : opts.uploader !== undefined
+      ? opts.uploader
+      : defaultImageUploader();
   const parsed = nodesSchema.safeParse(input.nodes);
   if (!parsed.success) {
     const i = parsed.error.issues[0];
@@ -220,13 +227,14 @@ export async function importFigmaNodes(
   const ds = await resolveProjectDesignSystem(db, actor, project);
   const svgs: Record<string, string> = {};
   for (const [id, svg] of Object.entries(input.svgs ?? {})) svgs[id] = sanitizeSvg(svg);
+  const images = await storeImportImages(db, actor, projectId, input.images ?? {}, uploader);
 
   for (let attempt = 1; ; attempt++) {
     const { version, doc } = await getDoc(db, actor, projectId);
     const right = doc.frames.reduce((m, f) => Math.max(m, f.canvas.x + f.width), -200);
     const result = figmaToDoc(roots, {
       svgs,
-      images: input.images ?? {},
+      images: images.resolved,
       variables: input.variables ?? {},
       designSystem: ds.spec,
       origin: { x: right + 200, y: 0 },
@@ -238,7 +246,7 @@ export async function importFigmaNodes(
         name: f.frame.name,
         width: f.frame.width,
       })),
-      report: result.report,
+      report: [...images.report, ...result.report],
       stats: result.stats,
     };
     if (opts.dryRun) return { version: null, ...summary, preview: result.frames };
