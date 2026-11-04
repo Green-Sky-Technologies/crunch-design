@@ -1,6 +1,11 @@
-import Link from 'next/link';
+import { permissionsFor } from '@crunch/authz';
 import { notFound } from 'next/navigation';
+import { EditorShell } from '@/components/editor/editor-shell';
+import { EditorProvider } from '@/features/doc-store';
 import { db, requireActor } from '@/server/context';
+import { hasWorkingCredential } from '@/server/services/credentials';
+import { getDoc } from '@/server/services/design-docs';
+import { resolveProjectDesignSystem } from '@/server/services/project-design-system';
 import { getProject } from '@/server/services/projects';
 import { NotFoundError } from '@/server/services/types';
 
@@ -11,24 +16,36 @@ export default async function ProjectPage({ params }: PageProps<'/w/[slug]/p/[pr
     if (e instanceof NotFoundError) notFound();
     throw e;
   });
+  const [state, ds, agentAvailable] = await Promise.all([
+    getDoc(db(), actor, project.id),
+    resolveProjectDesignSystem(db(), actor, project),
+    hasWorkingCredential(db(), actor.workspace.id),
+  ]);
 
-  // Placeholder shell: Epic 3 replaces this with chat · canvas · inspector.
   return (
-    <div className="grid flex-1 grid-cols-[320px_1fr_280px]">
-      <aside className="border-r border-border bg-surface p-4">
-        <Link href={`/w/${actor.workspace.slug}`} className="text-sm text-muted hover:text-text">
-          ← Projects
-        </Link>
-        <h1 className="mt-3 text-lg font-semibold">{project.name}</h1>
-        {project.description && <p className="mt-1 text-sm text-muted">{project.description}</p>}
-        <p className="mt-8 text-sm text-muted">The agent conversation will appear here (Epic 5).</p>
-      </aside>
-      <section className="flex items-center justify-center bg-surface-2 text-sm text-muted">
-        Canvas (Epic 3)
-      </section>
-      <aside className="border-l border-border bg-surface p-4 text-sm text-muted">
-        Inspector (Epic 3)
-      </aside>
-    </div>
+    <EditorProvider
+      info={{
+        project: { id: project.id, name: project.name, description: project.description },
+        workspace: {
+          id: actor.workspace.id,
+          slug: actor.workspace.slug,
+          name: actor.workspace.name,
+        },
+        user: { id: actor.userId, role: actor.role },
+        permissions: permissionsFor(actor.role),
+        designSystem: ds,
+        agentAvailable,
+      }}
+      initial={{ version: state.version, doc: state.doc }}
+    >
+      <EditorShell />
+    </EditorProvider>
   );
+}
+
+export async function generateMetadata({ params }: PageProps<'/w/[slug]/p/[projectId]'>) {
+  const { slug, projectId } = await params;
+  const actor = await requireActor(slug);
+  const project = await getProject(db(), actor, projectId).catch(() => null);
+  return { title: project?.name ?? 'Project' };
 }

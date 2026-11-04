@@ -26,9 +26,16 @@ export default async function WorkspaceLayout({ children, params }: LayoutProps<
           base={base}
           items={[
             { href: '', label: 'Projects' },
+            { href: '/design-systems', label: 'Design systems' },
             { href: '/settings/members', label: 'Members' },
+            ...(can(actor.role, 'design:edit')
+              ? [{ href: '/settings/figma', label: 'Figma' }]
+              : []),
             ...(can(actor.role, 'workspace:manage_credentials')
-              ? [{ href: '/settings/credentials', label: 'Model access' }]
+              ? [
+                  { href: '/settings/credentials', label: 'Model access' },
+                  { href: '/settings/usage', label: 'Usage' },
+                ]
               : []),
           ]}
         />

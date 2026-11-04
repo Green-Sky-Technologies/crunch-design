@@ -11,6 +11,8 @@ const nextConfig: NextConfig = {
     '@crunch/providers',
     '@crunch/doc-model',
     '@crunch/renderer',
+    '@crunch/contracts',
+    '@crunch/ds-lint',
   ],
   serverExternalPackages: ['pg'],
   turbopack: {
