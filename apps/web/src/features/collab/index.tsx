@@ -2,7 +2,7 @@
 
 /**
  * Collaboration controls in the editor top bar (Epic 6): comments (6.1) with ask-agent
- * requests (5.7), named versions (6.2), notifications.
+ * requests (5.7), named versions (6.2), share links (6.3), notifications.
  * Reads everything from useEditor() / useDocStore(); no props (editor-shell slot).
  */
 import { useEffect } from 'react';
@@ -13,6 +13,7 @@ import { CommentsPanel } from './comments-panel';
 import { Drawer } from './drawer';
 import { NotificationsBell } from './notifications';
 import { useCollab, type CollabPanel } from './store';
+import { SharePanel } from './share-panel';
 import { VersionsPanel } from './versions-panel';
 
 const THREAD_POLL_MS = 15_000;
@@ -49,7 +50,7 @@ function PanelButton({
 }
 
 export function CollabControls() {
-  const { project } = useEditor();
+  const { project, can } = useEditor();
   const panel = useCollab((s) => s.panel);
   const openCount = useCollab((s) => s.threads.filter((t) => t.status === 'open').length);
   useThreadSync(project.id);
@@ -59,11 +60,17 @@ export function CollabControls() {
     <>
       <PanelButton id="comments">Comments{openCount ? ` (${openCount})` : ''}</PanelButton>
       <PanelButton id="versions">Versions</PanelButton>
+      {can('share:manage') && <PanelButton id="share">Share</PanelButton>}
       <NotificationsBell />
       {panel === 'comments' && <CommentsDrawer />}
       {panel === 'versions' && (
         <Drawer title="Versions">
           <VersionsPanel />
+        </Drawer>
+      )}
+      {panel === 'share' && (
+        <Drawer title="Share">
+          <SharePanel />
         </Drawer>
       )}
     </>
