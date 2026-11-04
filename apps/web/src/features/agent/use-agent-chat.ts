@@ -21,6 +21,8 @@ export interface AgentChat {
   retry(assistantMessageId: string): Promise<void>;
   /** Replace one message (e.g. after a job starts). */
   upsert(view: MessageView): void;
+  /** Add a message and follow its stream (job messages). */
+  track(view: MessageView): void;
   dismissError(): void;
 }
 
@@ -188,6 +190,11 @@ export function useAgentChat(projectId: string, load: boolean, enabled: boolean)
     cancel,
     retry,
     upsert,
+    track: (view: MessageView) => {
+      upsert(view);
+      setConversationId(view.conversationId);
+      follow(view.id);
+    },
     dismissError: () => setError(null),
   };
 }

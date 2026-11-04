@@ -3,7 +3,7 @@
  * Nothing secret goes into the spec; the token is the only credential the sandbox sees.
  */
 import {
-  genericJobPrompt,
+  jobPrompt,
   jobToolNames,
   MODEL_TIERS,
   resolveModel,
@@ -13,6 +13,7 @@ import {
 import type { JobRunner, StartJob } from '@crunch/contracts';
 import { agentMessages, eq, jobs, type Db } from '@crunch/db';
 import { VercelSandboxRunner, type PreparedJob, type SandboxApi } from '@crunch/sandbox-runner';
+import { getDoc } from '../design-docs';
 import { jobActor } from '../jobs';
 import { resolveProjectDesignSystem } from '../project-design-system';
 import { getProject } from '../projects';
@@ -21,10 +22,6 @@ import { getModelSettings } from './model-settings';
 
 /** Slack on top of the job timeout before its token expires. */
 const TOKEN_SLACK_SECONDS = 10 * 60;
-
-/** Kind-specific prompt builders register here (generation jobs, Story 5.5). */
-export type JobPromptBuilder = (job: StartJob) => string;
-export const jobPromptBuilders = new Map<string, JobPromptBuilder>();
 
 export async function prepareJob(db: Db, job: StartJob): Promise<PreparedJob> {
   const [row] = await db.select().from(jobs).where(eq(jobs.id, job.jobId)).limit(1);
@@ -44,18 +41,19 @@ export async function prepareJob(db: Db, job: StartJob): Promise<PreparedJob> {
     smallModel = model;
   }
   let dsBlock = '';
+  let doc = null;
   if (row.projectId) {
     const project = await getProject(db, actor, row.projectId);
     dsBlock = serializeDesignSystem((await resolveProjectDesignSystem(db, actor, project)).spec);
+    doc = (await getDoc(db, actor, row.projectId)).doc;
   }
   const { token } = await issueJobToken(db, job.jobId, job.timeoutSeconds + TOKEN_SLACK_SECONDS);
-  const build = jobPromptBuilders.get(job.kind);
   return {
     jobToken: token,
     model,
     smallModel: smallModel ?? MODEL_TIERS.utility,
     spec: {
-      prompt: build ? build(job) : genericJobPrompt(job.kind, job.input),
+      prompt: jobPrompt(job.kind, job.input, doc),
       systemPrompt: [systemPromptFor('job'), dsBlock].filter(Boolean).join('\n\n'),
       tools: jobToolNames(),
       maxTurns: 80,

@@ -81,6 +81,35 @@ const post = (url: string, body?: unknown) =>
     body: body === undefined ? undefined : JSON.stringify(body),
   });
 
+export type JobStatus =
+  'queued' | 'provisioning' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+
+export interface JobView {
+  id: string;
+  kind: string;
+  status: JobStatus;
+  error: string | null;
+  result: { summary?: string; frames?: { frameId: string; name: string }[] } | null;
+  lastEventSeq: number;
+}
+
+export interface JobEvent {
+  seq: number;
+  type: 'status' | 'progress' | 'log' | 'tool' | 'frame' | 'result' | 'error';
+  data: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface StartJobBody {
+  projectId: string;
+  conversationId?: string;
+  kind: JobSuggestion['kind'];
+  prompt: string;
+  frameIds?: string[];
+  count?: number;
+  model?: string;
+}
+
 export const agentApi = {
   chat: (projectId: string) =>
     fetch(`/api/agent/chat?projectId=${encodeURIComponent(projectId)}`).then((r) =>
@@ -89,6 +118,10 @@ export const agentApi = {
   send: (body: SendBody) => post('/api/agent/messages', body).then((r) => json<SendResult>(r)),
   cancel: (messageId: string) =>
     post(`/api/agent/messages/${messageId}/cancel`).then((r) => json<MessageView>(r)),
+  startJob: (body: StartJobBody) =>
+    post('/api/agent/jobs', body).then((r) => json<{ job: JobView; message: MessageView }>(r)),
+  getJob: (jobId: string) => fetch(`/api/jobs/${jobId}`).then((r) => json<JobView>(r)),
+  cancelJob: (jobId: string) => post(`/api/jobs/${jobId}/cancel`).then((r) => json<JobView>(r)),
   uploadImage: async (projectId: string, file: File) => {
     const form = new FormData();
     form.set('projectId', projectId);
@@ -123,6 +156,19 @@ export function followMessage(
       resolve();
     },
   };
+}
+
+/**
+ * Follow a job's event stream. The browser resends Last-Event-ID on reconnect, and the server
+ * replays everything after it, so progress survives network blips and reloads.
+ */
+export function followJob(jobId: string, onEvent: (e: JobEvent) => void): () => void {
+  if (typeof EventSource === 'undefined') return () => {};
+  const es = new EventSource(`/api/jobs/${jobId}/events`);
+  for (const type of ['status', 'progress', 'log', 'tool', 'frame', 'result', 'error'])
+    es.addEventListener(type, (e) => onEvent(JSON.parse((e as MessageEvent<string>).data)));
+  es.addEventListener('done', () => es.close());
+  return () => es.close();
 }
 
 /** Parse a Figma frame link (figma.com/design|file/<key>/…?node-id=1-2). */

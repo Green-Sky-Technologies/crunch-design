@@ -4,32 +4,34 @@
 import Link from 'next/link';
 import { useEffect, useRef } from 'react';
 import { useEditor } from '../doc-store';
-import type { JobSuggestion } from './api';
+import { agentApi, type JobSuggestion } from './api';
 import { Composer } from './composer';
+import { JobCard, JobSuggestionCard } from './job-card';
 import { MessageItem } from './message-item';
 import { useAgentChat } from './use-agent-chat';
-
-const KIND_LABEL: Record<JobSuggestion['kind'], string> = {
-  generate: 'Generate frames',
-  redesign: 'Redesign',
-  alternatives: 'Alternatives',
-};
-
-function JobSuggestionCard({ s }: { s: JobSuggestion }) {
-  return (
-    <div className="card mt-2 p-3 text-xs" data-testid="job-suggestion">
-      <p className="font-medium">{KIND_LABEL[s.kind]}</p>
-      <p className="mt-0.5 text-muted">{s.prompt}</p>
-      <p className="mt-2 text-muted">Background jobs run with the generation model.</p>
-    </div>
-  );
-}
 
 export function AgentPane() {
   const { agentAvailable, can, workspace, project } = useEditor();
   const canRun = can('agent:run');
   const chat = useAgentChat(project.id, agentAvailable, canRun && agentAvailable);
   const endRef = useRef<HTMLDivElement>(null);
+  const live = canRun && agentAvailable;
+
+  const startJob = async (s: JobSuggestion) => {
+    try {
+      const { message } = await agentApi.startJob({
+        projectId: project.id,
+        conversationId: chat.conversationId ?? undefined,
+        kind: s.kind,
+        prompt: s.prompt,
+        frameIds: s.frameIds,
+        count: s.count,
+      });
+      chat.track(message);
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : 'Could not start the job');
+    }
+  };
 
   useEffect(() => {
     endRef.current?.scrollIntoView?.({ block: 'end' });
@@ -68,7 +70,14 @@ export function AgentPane() {
             canRun={canRun && agentAvailable}
             onCancel={() => void chat.cancel(m.id)}
             onRetry={() => void chat.retry(m.id)}
-            extra={m.jobSuggestion ? <JobSuggestionCard s={m.jobSuggestion} /> : null}
+            extra={
+              <>
+                {m.jobSuggestion && (
+                  <JobSuggestionCard s={m.jobSuggestion} canRun={live} onStart={startJob} />
+                )}
+                {m.jobId && <JobCard jobId={m.jobId} canRun={live} />}
+              </>
+            }
           />
         ))}
         {chat.error && (

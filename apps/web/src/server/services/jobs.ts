@@ -270,6 +270,17 @@ export async function cancelJob(
   return toJobView(row ?? (await loadJob(db, actor, jobId)));
 }
 
+/** The chat text for a finished job: the agent's summary plus the frames it created (Story 5.5 AC). */
+export function jobSummaryText(result: { summary: string; frames: unknown[] }): string {
+  const names = result.frames
+    .map((f) => (f as { name?: unknown }).name)
+    .filter((n): n is string => typeof n === 'string');
+  const created = names.length
+    ? `\n\nCreated ${names.length === 1 ? '1 frame' : `${names.length} frames`}: ${names.join(', ')}.`
+    : '';
+  return `${result.summary || 'Job finished.'}${created}`.trim();
+}
+
 // ---------------------------------------------------------------------------------------------
 // Reports from the sandbox (job-token auth)
 // ---------------------------------------------------------------------------------------------
@@ -325,7 +336,7 @@ export async function reportJobEvent(
           turns: [
             {
               role: 'assistant',
-              content: [{ type: 'text', text: result.summary || 'Job finished.' }],
+              content: [{ type: 'text', text: jobSummaryText(result) }],
             },
           ],
         },

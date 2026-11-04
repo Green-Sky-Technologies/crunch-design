@@ -75,6 +75,11 @@ beforeEach(() => {
         needsRun: true,
         streamUrl: '/api/agent/messages/a2/stream',
       });
+    if (url === '/api/agent/jobs')
+      return body({
+        job: { id: 'j1', status: 'queued' },
+        message: view({ id: 'a9', seq: 9, status: 'streaming', jobId: 'j1' }),
+      });
     if (url.endsWith('/cancel')) return body(view({ id: 'a2', seq: 2, status: 'cancelled' }));
     return new Response('{}', { status: 404 });
   });
@@ -173,6 +178,19 @@ describe('AgentPane', () => {
     ];
     renderPane();
     expect(await screen.findByTestId('job-suggestion')).toBeTruthy();
+    fireEvent.click(screen.getByText('Start background job'));
+    expect(await screen.findByTestId('job-card')).toBeTruthy();
+    const startBody = JSON.parse(
+      fetchMock.mock.calls.find((c) => c[0] === '/api/agent/jobs')![1].body,
+    );
+    expect(startBody).toMatchObject({ kind: 'generate', prompt: 'Design a pricing page' });
+    const jobStream = FakeEventSource.all.find((e) => e.url === '/api/jobs/j1/events')!;
+    act(() => jobStream.emit('status', { seq: 2, type: 'status', data: { status: 'running' } }));
+    act(() =>
+      jobStream.emit('frame', { seq: 3, type: 'frame', data: { frameId: 'f_x', name: 'Pricing' } }),
+    );
+    expect(screen.getByText('Pricing')).toBeTruthy();
+    expect(screen.getByTestId('job-card').dataset.status).toBe('running');
   });
 
   it('viewers get no composer', async () => {

@@ -67,7 +67,7 @@ export function MessageItem({
     <div className="text-sm" aria-busy={running} data-testid="assistant-message">
       {m.text ? (
         <p className="whitespace-pre-wrap">{m.text}</p>
-      ) : running ? (
+      ) : running && !m.jobId ? (
         <p className="animate-pulse text-muted">Thinking…</p>
       ) : null}
       {m.activity.length > 0 && (
@@ -83,7 +83,7 @@ export function MessageItem({
       {extra}
       {canRun && (
         <div className="mt-1 flex gap-2">
-          {running && (
+          {running && !m.jobId && (
             <button type="button" className="text-xs text-muted underline" onClick={onCancel}>
               Cancel
             </button>
