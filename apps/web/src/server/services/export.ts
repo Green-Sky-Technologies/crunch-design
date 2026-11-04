@@ -4,7 +4,7 @@
  * Needs export:deterministic, which Viewers have (SPEC §3, D17). Reads are workspace-scoped.
  */
 import { assertCan } from '@crunch/authz';
-import { agentConversations, and, desc, eq, type Db } from '@crunch/db';
+import { agentConversations, and, designDocs, desc, eq, type Db } from '@crunch/db';
 import type { DesignDoc } from '@crunch/doc-model';
 import type { HandoffBundle } from '@crunch/contracts';
 import {
@@ -46,6 +46,11 @@ export interface ExportFile {
 export interface ExportSource {
   project: { id: string; name: string; description: string | null };
   doc: DesignDoc;
+  /**
+   * When this content was last changed: the version's creation time, or the live doc's last
+   * write. Used as the handoff `generatedAt`, so exporting the same state twice is identical.
+   */
+  asOf: Date;
   designSystem: ResolvedDesignSystem;
   versionId: string | null;
 }
@@ -59,11 +64,26 @@ export async function loadExportSource(
 ): Promise<ExportSource> {
   assertCan(actor.role, 'export:deterministic');
   const project = await getProject(db, actor, projectId);
-  const doc = versionId
-    ? (await getSnapshotDoc(db, actor, project.id, versionId)).doc
-    : (await getDoc(db, actor, project.id)).doc;
+  let doc: DesignDoc;
+  let asOf: Date;
+  if (versionId) {
+    const v = await getSnapshotDoc(db, actor, project.id, versionId);
+    doc = v.doc;
+    asOf = v.summary.createdAt;
+  } else {
+    doc = (await getDoc(db, actor, project.id)).doc;
+    const [row] = await db
+      .select({ updatedAt: designDocs.updatedAt })
+      .from(designDocs)
+      .where(
+        and(eq(designDocs.projectId, project.id), eq(designDocs.workspaceId, actor.workspace.id)),
+      )
+      .limit(1);
+    asOf = row?.updatedAt ?? project.updatedAt;
+  }
   const designSystem = await resolveProjectDesignSystem(db, actor, project);
   return {
+    asOf,
     project: { id: project.id, name: project.name, description: project.description },
     doc,
     designSystem,
@@ -167,7 +187,7 @@ export async function buildProjectHandoff(
   db: Db,
   actor: Actor,
   projectId: string,
-  opts: { frameIds?: string[]; versionId?: string; source?: ExportSource } = {},
+  opts: { frameIds?: string[]; versionId?: string; source?: ExportSource; generatedAt?: Date } = {},
 ): Promise<HandoffBundle> {
   const src = opts.source ?? (await loadExportSource(db, actor, projectId, opts.versionId));
   const [versions, conversations] = await Promise.all([
@@ -190,10 +210,14 @@ export async function buildProjectHandoff(
       doc: src.doc,
       designSystem: { spec: src.designSystem.spec, version: src.designSystem.version },
       frameIds: opts.frameIds,
+      generatedAt: opts.generatedAt ?? src.asOf,
       intent: {
         projectName: src.project.name,
         projectDescription: src.project.description,
-        versions: versions.map((v) => ({ name: v.name, description: v.description })),
+        // Only versions that existed at the exported state, so re-exports stay identical.
+        versions: versions
+          .filter((v) => v.createdAt <= src.asOf || !src.versionId)
+          .map((v) => ({ name: v.name, description: v.description })),
         conversationTitles: conversations.map((c) => c.title),
       },
     });

@@ -1,7 +1,8 @@
 /**
  * ZIP export (Story 7.1): index.html with every frame, one page per frame, bundled images
  * (when an asset fetcher is supplied), and a README. Byte-for-byte deterministic for the same
- * inputs (fixed entry dates, sorted entries), so exports can be diffed and cached.
+ * inputs: entries get a fixed date and are written in sorted path order, so exports can be
+ * diffed and cached.
  */
 import { createHash } from 'node:crypto';
 import type { DesignDoc, DesignSystemSpec } from '@crunch/doc-model';
@@ -70,13 +71,11 @@ export async function buildExportZip(
 ): Promise<ZipExportResult> {
   const frameIds = resolveFrameIds(doc, opts.frameIds);
   const warnings: string[] = [];
-  const zip = new JSZip();
-  const add = (path: string, data: string | Uint8Array) =>
-    zip.file(path, data, {
-      date: FIXED_DATE,
-      createFolders: false,
-      binary: typeof data !== 'string',
-    });
+  // Collected first and written in sorted order (insertion order would depend on code paths).
+  const entries = new Map<string, string | Uint8Array>();
+  const add = (path: string, data: string | Uint8Array) => {
+    entries.set(path, data);
+  };
 
   // Bundle images, page-relative paths are fixed up per page depth below.
   const sources = collectImageSources(doc, frameNodeIds(doc, frameIds));
@@ -136,9 +135,16 @@ export async function buildExportZip(
     add(path, data);
   }
 
-  const files = Object.keys(zip.files)
-    .filter((p) => !zip.files[p]!.dir)
-    .sort();
+  const files = [...entries.keys()].sort();
+  const zip = new JSZip();
+  for (const path of files) {
+    const data = entries.get(path)!;
+    zip.file(path, data, {
+      date: FIXED_DATE,
+      createFolders: false,
+      binary: typeof data !== 'string',
+    });
+  }
   const out = await zip.generateAsync({
     type: 'uint8array',
     compression: 'DEFLATE',

@@ -178,6 +178,22 @@ describe('buildExportZip', () => {
     expect(r.files.some((f) => f.startsWith('assets/'))).toBe(false);
   });
 
+  it('is byte-for-byte deterministic with assets and extra files, entries sorted', async () => {
+    const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+    const build = () =>
+      buildExportZip(docWithImage(), ds, {
+        fetchAsset: async () => ({ bytes: png, contentType: 'image/png' }),
+        // Deliberately unsorted insertion order.
+        extraFiles: { 'z-last.json': '{}', 'handoff.json': '{"a":1}', 'A.md': '# hi' },
+      });
+    const a = await build();
+    const b = await build();
+    expect(Buffer.from(a.zip).equals(Buffer.from(b.zip))).toBe(true);
+    const order = Object.keys((await JSZip.loadAsync(a.zip)).files);
+    expect(order).toEqual([...order].sort());
+    expect(order).toEqual(a.files);
+  });
+
   it('adds extra files but rejects path traversal', async () => {
     const r = await buildExportZip(sampleLandingDoc(), ds, {
       extraFiles: { 'handoff.json': '{}' },

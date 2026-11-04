@@ -162,6 +162,49 @@ describe('handoff bundle export', () => {
     expect(handoffBundle.safeParse(parsed).success).toBe(true);
   });
 
+  it('exports the same version as byte-identical handoff ZIPs (generatedAt = version time)', async () => {
+    const { editor, project } = await setup();
+    const v = await createNamedVersion(db, editor, project.id, { name: 'v1', description: 'n' });
+    const exportIt = async () =>
+      (
+        await exportDesign(
+          db,
+          editor,
+          project.id,
+          { format: 'handoff-zip', versionId: v.id },
+          { fetchAsset: noFetch },
+        )
+      ).body as Uint8Array;
+    const first = await exportIt();
+    await new Promise((r) => setTimeout(r, 20));
+    // Later edits and later versions don't change an export of v1.
+    await commit(editor, project.id, [
+      { op: 'setProps', id: 'n_herotitle1', patch: { text: 'Later edit' } },
+    ]);
+    await createNamedVersion(db, editor, project.id, { name: 'v2', description: 'later' });
+    const second = await exportIt();
+    expect(Buffer.from(first).equals(Buffer.from(second))).toBe(true);
+
+    const bundle = await buildProjectHandoff(db, editor, project.id, { versionId: v.id });
+    expect(bundle.generatedAt).toBe(v.createdAt.toISOString());
+    expect(bundle.intent.notes).toEqual(['Version “v1”: n']);
+  });
+
+  it('exports the unchanged live design identically, and changes after an edit', async () => {
+    const { editor, project } = await setup();
+    const live = async () =>
+      (await exportDesign(db, editor, project.id, { format: 'handoff' })).body as string;
+    const a = await live();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(await live()).toBe(a);
+    await commit(editor, project.id, [
+      { op: 'setProps', id: 'n_herotitle1', patch: { text: 'Edited' } },
+    ]);
+    const c = await live();
+    expect(c).not.toBe(a);
+    expect(JSON.parse(c).generatedAt > JSON.parse(a).generatedAt).toBe(true);
+  });
+
   it('is workspace-scoped', async () => {
     const { project } = await setup();
     const outsider = await makeActor(db, 'admin');
