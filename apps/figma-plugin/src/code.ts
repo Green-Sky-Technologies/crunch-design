@@ -5,6 +5,7 @@
  * @crunch/figma-convert as pure, tested functions.
  */
 import { applyPushPlan } from './main/push';
+import { serializeSelection } from './main/selection';
 import type { FileInfo, Settings, ToMain, ToUi } from './shared/messages';
 
 const SETTINGS_KEY = 'crunchdesign.settings.v1';
@@ -84,6 +85,12 @@ async function handle(msg: ToMain) {
       figma.notify(
         `Pushed: ${out.created} created, ${out.updated} updated, ${out.removed} removed`,
       );
+      return;
+    }
+    case 'read-selection': {
+      post({ type: 'progress', message: 'Reading selection…' });
+      const payload = await serializeSelection();
+      post({ type: 'selection', payload, file: fileInfo() });
       return;
     }
     case 'close':

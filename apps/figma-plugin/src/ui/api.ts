@@ -78,6 +78,14 @@ export class Api {
       body,
     });
   }
+  importNodes(projectId: string, body: Record<string, unknown>) {
+    return this.request<{
+      version: number;
+      frames: { id: string; name: string }[];
+      report: ReportItem[];
+      stats: { nodes: number; tokens: number; svgs: number; images: number };
+    }>(`/projects/${encodeURIComponent(projectId)}/import`, { method: 'POST', body });
+  }
   pushResult(
     projectId: string,
     body: {

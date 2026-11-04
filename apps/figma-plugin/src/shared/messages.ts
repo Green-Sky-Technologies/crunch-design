@@ -2,7 +2,16 @@
  * Messages between the plugin UI iframe (network, rendering) and the main thread (Figma
  * document access). The UI talks to the CrunchDesign API; the main thread never does.
  */
-import type { PushPlan, ReportItem } from '@crunch/figma-convert/plugin';
+import type { FigmaNode, PushPlan, ReportItem } from '@crunch/figma-convert/plugin';
+
+export interface SelectionPayload {
+  nodes: FigmaNode[];
+  svgs: Record<string, string>;
+  images: Record<string, string>;
+  variables: Record<string, string>;
+  /** Things that couldn't be exported (shown in the report). */
+  skipped: string[];
+}
 
 export interface Settings {
   apiBase: string;
@@ -34,6 +43,7 @@ export type ToMain =
   | { type: 'notify'; message: string; error?: boolean }
   | { type: 'resize'; height: number }
   | { type: 'push'; plan: PushPlan }
+  | { type: 'read-selection' }
   | { type: 'close' };
 
 /** Main thread -> UI. */
@@ -41,6 +51,7 @@ export type ToUi =
   | { type: 'settings'; settings: Settings | null; file: FileInfo }
   | { type: 'progress'; message: string }
   | { type: 'push-done'; result: PushDone }
+  | { type: 'selection'; payload: SelectionPayload; file: FileInfo }
   | { type: 'error'; message: string };
 
 export const DEFAULT_API_BASE = 'http://localhost:3000';

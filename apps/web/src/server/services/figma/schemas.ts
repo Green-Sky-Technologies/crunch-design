@@ -34,6 +34,32 @@ export const pushPlanRequest = z
   })
   .strict();
 
+/** Plugin import: serialized nodes plus exported SVGs and image data (Story 8.3). */
+export const IMPORT_MAX_BYTES = 12 * MB;
+export const importRequest = z
+  .object({
+    fileKey: figmaFileKey.optional(),
+    fileName: z.string().max(300).optional(),
+    /** REST-shaped nodes (validated in depth by figma-convert's figmaNode schema). */
+    nodes: z.array(z.unknown()).min(1).max(20),
+    svgs: z
+      .record(z.string().max(200), z.string().max(200_000))
+      .refine((m) => Object.keys(m).length <= 300, 'Too many SVGs')
+      .default({}),
+    images: z
+      .record(z.string().max(200), z.string().max(2 * MB))
+      .refine((m) => Object.keys(m).length <= 50, 'Too many images')
+      .default({}),
+    /** Figma variable id -> name. */
+    variables: z
+      .record(z.string().max(200), z.string().max(300))
+      .refine((m) => Object.keys(m).length <= 5000, 'Too many variables')
+      .default({}),
+  })
+  .strict();
+
+export const importUrlRequest = z.object({ url: z.string().max(2000) }).strict();
+
 export const PUSH_RESULT_MAX_BYTES = 2 * MB;
 export const pushResultRequest = z
   .object({

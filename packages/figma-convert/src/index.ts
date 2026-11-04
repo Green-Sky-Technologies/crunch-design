@@ -10,3 +10,6 @@ export * from './report';
 export * from './reconcile';
 export * from './variables';
 export * from './to-figma';
+export * from './figma-node';
+export * from './from-figma';
+export * from './serialize';

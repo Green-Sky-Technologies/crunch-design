@@ -1,13 +1,21 @@
+import { can } from '@crunch/authz';
 import { db, requireActor } from '@/server/context';
+import { getFigmaCredential } from '@/server/services/figma/credentials';
 import { listPluginTokens } from '@/server/services/plugin-tokens';
+import { listProjects } from '@/server/services/projects';
+import { FigmaImport, FigmaToken } from './_components/figma-import';
 import { PluginTokens } from './_components/plugin-tokens';
 
 export const metadata = { title: 'Figma' };
 
-/** Figma integration settings (Epic 8): plugin tokens. */
+/** Figma integration settings (Epic 8): plugin tokens, Figma REST token, import from a link. */
 export default async function FigmaSettingsPage({ params }: PageProps<'/w/[slug]/settings/figma'>) {
   const actor = await requireActor((await params).slug);
-  const tokens = await listPluginTokens(db(), actor);
+  const [tokens, figmaCred, projects] = await Promise.all([
+    listPluginTokens(db(), actor),
+    getFigmaCredential(db(), actor),
+    listProjects(db(), actor),
+  ]);
 
   return (
     <main className="mx-auto w-full max-w-3xl px-6 py-8">
@@ -19,6 +27,13 @@ export default async function FigmaSettingsPage({ params }: PageProps<'/w/[slug]
       </p>
       <div className="flex flex-col gap-6">
         <PluginTokens initial={tokens} currentUserId={actor.userId} />
+        <FigmaToken initial={figmaCred} />
+        <FigmaImport
+          projects={projects.map((p) => ({ id: p.id, name: p.name }))}
+          slug={actor.workspace.slug}
+          canEdit={can(actor.role, 'design:edit')}
+          hasToken={!!figmaCred}
+        />
       </div>
     </main>
   );
