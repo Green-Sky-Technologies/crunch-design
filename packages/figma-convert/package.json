@@ -1,0 +1,20 @@
+{
+  "name": "@crunch/figma-convert",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "test": "vitest run --passWithNoTests",
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "@crunch/doc-model": "workspace:*",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@figma/plugin-typings": "^1.142.0"
+  }
+}

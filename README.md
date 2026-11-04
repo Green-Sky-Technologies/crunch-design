@@ -11,6 +11,12 @@ packages/db         Drizzle schema, migrations, Postgres client
 packages/crypto     Envelope encryption for secrets at rest
 packages/authz      Roles → permissions (single source of truth)
 packages/providers  Claude routes (Anthropic, Bedrock, Vertex, Foundry): credential shapes, clients, tests
+packages/doc-model  DesignDoc schema, style allowlist, tokens, design-system spec, ops/reducer (Epic 2)
+packages/renderer   Token CSS, live frame renderer (React, Shadow DOM) and static HTML renderer (Epic 2)
+packages/contracts  Cross-stream interfaces: agent tools, agent edit, ds-lint, job runner, overlays, handoff
+packages/ds-lint    Design-system linter (stub until Epic 4)
+packages/canvas, agent, sandbox-runner, handoff, figma-convert   Phase 1 skeletons (see docs/worktree-plan.md)
+apps/figma-plugin   Figma plugin skeleton (Epic 8)
 infra/              OpenTofu: Vercel project, Neon Postgres, env vars
 ```
 

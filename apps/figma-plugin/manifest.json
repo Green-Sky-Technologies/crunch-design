@@ -1,0 +1,14 @@
+{
+  "name": "CrunchDesign",
+  "id": "crunchdesign-dev",
+  "api": "1.0.0",
+  "main": "dist/code.js",
+  "ui": "dist/ui.html",
+  "editorType": ["figma"],
+  "documentAccess": "dynamic-page",
+  "networkAccess": {
+    "allowedDomains": ["http://localhost:3000"],
+    "devAllowedDomains": ["http://localhost:3000"],
+    "reasoning": "Talks to the CrunchDesign API to push and import designs."
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "@crunch/agent",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "test": "vitest run --passWithNoTests",
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.4.0",
+    "@crunch/contracts": "workspace:*",
+    "@crunch/doc-model": "workspace:*",
+    "@crunch/ds-lint": "workspace:*",
+    "@crunch/providers": "workspace:*",
+    "zod": "^4.6.7"
+  }
+}

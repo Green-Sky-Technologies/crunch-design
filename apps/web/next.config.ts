@@ -13,6 +13,11 @@ const nextConfig: NextConfig = {
     '@crunch/renderer',
     '@crunch/contracts',
     '@crunch/ds-lint',
+    '@crunch/canvas',
+    '@crunch/agent',
+    '@crunch/sandbox-runner',
+    '@crunch/handoff',
+    '@crunch/figma-convert',
   ],
   serverExternalPackages: ['pg'],
   turbopack: {

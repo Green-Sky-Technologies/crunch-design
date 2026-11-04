@@ -12,6 +12,10 @@
   },
   "dependencies": {
     "@crunch/contracts": "workspace:*",
-    "@crunch/doc-model": "workspace:*"
+    "@crunch/doc-model": "workspace:*",
+    "culori": "^4.0.2"
+  },
+  "devDependencies": {
+    "@types/culori": "^4.0.1"
   }
 }
