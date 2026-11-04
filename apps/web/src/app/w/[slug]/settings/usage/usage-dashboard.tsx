@@ -106,6 +106,22 @@ export function UsageDashboard({ summary }: { summary: UsageSummary }) {
           }
         />
       </div>
+      {(t.partnerPricedCalls > 0 || t.incompleteCalls > 0) && (
+        <ul className="mt-3 space-y-1 text-xs text-muted" data-testid="usage-caveats">
+          {t.partnerPricedCalls > 0 && (
+            <li>
+              {fmt.format(t.partnerPricedCalls)} calls ran on Amazon Bedrock or Google Vertex AI.
+              Those providers bill at their own rates; their costs here use Anthropic list prices.
+            </li>
+          )}
+          {t.incompleteCalls > 0 && (
+            <li>
+              {fmt.format(t.incompleteCalls)} calls ended early (cancelled or disconnected); their
+              output tokens are estimated.
+            </li>
+          )}
+        </ul>
+      )}
       <DailyCost rows={summary.byDay} />
       <Table title="By member" rows={summary.byMember} />
       <Table title="By model" rows={summary.byModel} />

@@ -139,7 +139,7 @@ describe('LLM proxy (HTTP, for sandboxes)', () => {
     const res = await handleMessagesProxy(
       db,
       request(token, msgBody({ stream: true }), {
-        'anthropic-beta': 'some-beta-2026-01-01',
+        'anthropic-beta': 'interleaved-thinking-2025-05-14',
         'x-api-key': 'ignored-because-bearer-wins',
       }),
       {
@@ -157,7 +157,7 @@ describe('LLM proxy (HTTP, for sandboxes)', () => {
       .join('');
     expect(text).toBe('streamed text here');
     expect(client.calls[0]!.model).toBe('anthropic.claude-sonnet-5-5');
-    expect(client.headers[0]).toEqual({ 'anthropic-beta': 'some-beta-2026-01-01' });
+    expect(client.headers[0]).toEqual({ 'anthropic-beta': 'interleaved-thinking-2025-05-14' });
     const rows = await db.select().from(llmCalls);
     expect(rows).toHaveLength(1);
   });

@@ -17,6 +17,10 @@ export interface UsageTotals {
   /** cache read / (uncached input + cache read + cache write) */
   cacheHitRate: number;
   avgLatencyMs: number | null;
+  /** Calls on Bedrock/Vertex: billed at partner rates, so their cost is a list-price estimate. */
+  partnerPricedCalls: number;
+  /** Calls that ended before final usage (cancel/disconnect); output tokens are estimated. */
+  incompleteCalls: number;
 }
 
 export interface UsageRow extends UsageTotals {
@@ -43,6 +47,8 @@ const aggregates = {
   cacheWriteTokens: sql<number>`coalesce(sum(${llmCalls.cacheWriteTokens}), 0)::bigint`,
   costMicros: sql<number>`coalesce(sum(${llmCalls.estCostMicros}), 0)::bigint`,
   avgLatencyMs: sql<number | null>`avg(${llmCalls.latencyMs})::int`,
+  partnerPricedCalls: sql<number>`count(*) filter (where ${llmCalls.provider} in ('bedrock', 'vertex'))::int`,
+  incompleteCalls: sql<number>`count(*) filter (where ${llmCalls.stopReason} = 'incomplete')::int`,
 };
 
 type Agg = { [K in keyof typeof aggregates]: unknown };
@@ -64,6 +70,8 @@ function totals(r: Agg): UsageTotals {
     cacheHitRate: denom ? read / denom : 0,
     avgLatencyMs:
       r.avgLatencyMs === null || r.avgLatencyMs === undefined ? null : n(r.avgLatencyMs),
+    partnerPricedCalls: n(r.partnerPricedCalls),
+    incompleteCalls: n(r.incompleteCalls),
   };
 }
 

@@ -193,10 +193,46 @@ async function recordCall(
   });
 }
 
+/**
+ * Betas a sandbox may enable. Anything that turns on server-side tools, provider-side egress
+ * (MCP connector), premium speed or model fallback is rejected; other unknown betas are dropped.
+ */
+export const ALLOWED_BETAS = new Set([
+  'interleaved-thinking-2025-05-14',
+  'context-management-2025-06-27',
+  'fine-grained-tool-streaming-2025-05-14',
+  'token-efficient-tools-2025-02-19',
+  'claude-code-20250219',
+  'compact-2026-01-12',
+]);
+const FORBIDDEN_BETA =
+  /^(mcp-client|fast-mode|code-execution|files-api|skills|web-search|web-fetch|computer-use|oauth|server-side-fallback|message-threads|managed-agents)/;
+
+/** Filter an anthropic-beta header value. Throws for betas that must never pass. */
+export function filterBetas(header: string | null | undefined): string | undefined {
+  if (!header) return undefined;
+  const kept: string[] = [];
+  for (const raw of header.split(',')) {
+    const b = raw.trim();
+    if (!b) continue;
+    if (FORBIDDEN_BETA.test(b))
+      throw new ValidationError(`Beta "${b}" is not allowed through the proxy`);
+    if (ALLOWED_BETAS.has(b)) kept.push(b);
+  }
+  return kept.length ? kept.join(',') : undefined;
+}
+
 const passHeaders = (h?: Record<string, string>) => {
-  const beta = h?.['anthropic-beta'];
+  const beta = filterBetas(h?.['anthropic-beta']);
   return beta ? { 'anthropic-beta': beta } : undefined;
 };
+
+/** Rough output-token estimate from streamed content (for calls that end before message_delta). */
+function streamedChars(e: Anthropic.RawMessageStreamEvent): number {
+  if (e.type !== 'content_block_delta') return 0;
+  const d = e.delta as { type: string; text?: string; thinking?: string; partial_json?: string };
+  return (d.text ?? d.thinking ?? d.partial_json ?? '').length;
+}
 
 /** Run `call` against a prepared client and always write one llm_calls row. */
 async function metered(
@@ -211,6 +247,7 @@ async function metered(
   const started = now();
   let usage = emptyUsage();
   let requestId: string | null = null;
+  let chars = 0;
   try {
     const stream = prepared.messages.stream(
       { ...params, model: providerModelId(prepared.provider, prepared.model) },
@@ -218,6 +255,7 @@ async function metered(
     );
     for await (const e of stream) {
       usage = usageFromEvent(usage, e);
+      chars += streamedChars(e);
       if (e.type === 'message_start') requestId = e.message.id ?? null;
       await opts.onEvent?.(e);
     }
@@ -234,7 +272,15 @@ async function metered(
     return { ...final, model: prepared.model };
   } catch (err) {
     const pe = toProviderError(err);
-    await recordCall(db, ctx, prepared, usage, {
+    // The stream ended before its final usage (cancel, disconnect, error): keep the last usage
+    // seen and estimate output from what was streamed (~4 chars/token). Marked 'incomplete'.
+    const estimated = Math.ceil(chars / 4);
+    const partial = {
+      ...usage,
+      outputTokens: Math.max(usage.outputTokens, estimated),
+      stopReason: usage.stopReason ?? (requestId ? 'incomplete' : null),
+    };
+    await recordCall(db, ctx, prepared, partial, {
       latencyMs: now() - started,
       ok: false,
       errorType: pe.errorType,
@@ -278,18 +324,61 @@ export const TASK_FOR_JOB: Record<JobKind, LlmTask> = {
 export const MAX_PROXY_BODY_BYTES = 16 * 1024 * 1024;
 export const MAX_OUTPUT_TOKENS = 128_000;
 
+/**
+ * Custom (client-executed) tools only. Server tools (web search/fetch, code execution, MCP
+ * toolsets, Anthropic-defined tools) all carry a `type` and would run unmetered work, or
+ * provider-side egress past the sandbox's network allowlist, so they're rejected.
+ */
+const customTool = z
+  .object({
+    name: z.string().min(1).max(128),
+    description: z.string().max(20_000).optional(),
+    input_schema: z.record(z.string(), z.unknown()),
+    type: z.literal('custom').optional(),
+    cache_control: z.unknown().optional(),
+    strict: z.boolean().optional(),
+    eager_input_streaming: z.boolean().optional(),
+  })
+  .strict();
+
+/** The Messages API fields the Agent SDK needs; anything else (mcp_servers, container, speed, service_tier, ...) is rejected. */
 const proxyBody = z
   .object({
     model: z.string().min(1).max(100),
     max_tokens: z.number().int().min(0).max(MAX_OUTPUT_TOKENS),
     messages: z.array(z.unknown()).max(10_000),
+    system: z.union([z.string(), z.array(z.unknown())]).optional(),
+    tools: z.array(customTool).max(200).optional(),
+    tool_choice: z.unknown().optional(),
+    thinking: z.unknown().optional(),
+    output_config: z
+      .object({ effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional() })
+      .strict()
+      .optional(),
+    metadata: z
+      .object({ user_id: z.string().max(256).optional() })
+      .strict()
+      .optional(),
+    stop_sequences: z.array(z.string().max(200)).max(8).optional(),
+    temperature: z.number().optional(),
+    top_p: z.number().optional(),
+    top_k: z.number().optional(),
+    cache_control: z.unknown().optional(),
+    context_management: z.unknown().optional(),
     stream: z.boolean().optional(),
   })
-  .passthrough();
+  .strict();
 
 const countBody = z
-  .object({ model: z.string().min(1).max(100), messages: z.array(z.unknown()).max(10_000) })
-  .passthrough();
+  .object({
+    model: z.string().min(1).max(100),
+    messages: z.array(z.unknown()).max(10_000),
+    system: z.union([z.string(), z.array(z.unknown())]).optional(),
+    tools: z.array(customTool).max(200).optional(),
+    tool_choice: z.unknown().optional(),
+    thinking: z.unknown().optional(),
+  })
+  .strict();
 
 /** Errors in the Anthropic API's shape, so SDKs in the sandbox handle them normally. */
 export function anthropicError(status: number, type: string, message: string): Response {
@@ -349,7 +438,8 @@ export async function handleMessagesProxy(
     const params = rest as unknown as MessageStreamParams;
     const ctx = ctxForJob(job);
     const prepared = await prepareCall(db, ctx, params.model, deps);
-    const headers = { 'anthropic-beta': req.headers.get('anthropic-beta') ?? '' };
+    const betas = filterBetas(req.headers.get('anthropic-beta'));
+    const headers = { 'anthropic-beta': betas ?? '' };
     // Model calls count as job activity, throttled, so a long turn doesn't look like a dead sandbox.
     let lastBeat = 0;
     const beat = () => {

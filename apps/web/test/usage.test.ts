@@ -60,6 +60,26 @@ describe('usage dashboard', () => {
     expect(formatUsd(1_234_567)).toBe('$1.23');
   });
 
+  it('flags partner-priced and incomplete calls', async () => {
+    const admin = await makeActor(db, 'admin');
+    const call = (provider: 'anthropic' | 'bedrock' | 'vertex', stopReason: string | null) => ({
+      workspaceId: admin.workspace.id,
+      task: 'generation' as const,
+      provider,
+      model: 'claude-opus-5-5',
+      stopReason,
+    });
+    await db
+      .insert(llmCalls)
+      .values([
+        call('bedrock', 'end_turn'),
+        call('vertex', 'incomplete'),
+        call('anthropic', 'end_turn'),
+      ]);
+    const s = await usageSummary(db, admin);
+    expect(s.totals).toMatchObject({ calls: 3, partnerPricedCalls: 2, incompleteCalls: 1 });
+  });
+
   it('is admin-only', async () => {
     const editor = await makeActor(db, 'editor');
     await expect(usageSummary(db, editor)).rejects.toBeInstanceOf(ForbiddenError);
