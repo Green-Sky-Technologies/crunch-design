@@ -13,6 +13,15 @@ import { stableStringify } from './stable';
 
 export type CacheTtl = '5m' | '1h';
 
+/**
+ * TTL for the tools + system + design-system prefix (ADR 0002): 1h by default, so members who
+ * pause 5–60 minutes between prompts still hit the cache. AGENT_PREFIX_CACHE_TTL=5m switches it
+ * for measurement.
+ */
+export function prefixCacheTtl(env: Record<string, string | undefined> = process.env): CacheTtl {
+  return env.AGENT_PREFIX_CACHE_TTL === '5m' ? '5m' : '1h';
+}
+
 /** Interactive-only tool: hand a too-big request over to a generation job (Story 5.4 AC). */
 export const SUGGEST_JOB_TOOL = 'suggest_generation_job';
 export const suggestJobInput = z

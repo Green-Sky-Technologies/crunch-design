@@ -60,6 +60,12 @@ describe('cached prefix', () => {
     expect(a).not.toMatch(/20\d\d-\d\d-\d\dT/);
   });
 
+  it('stays small: repeated schemas are $refs, not inlined copies', () => {
+    // Inlining the style allowlist made the tools ~1 MB (~250k tokens); with $refs it's ~45 KB.
+    for (const r of ['interactive', 'job'] as const)
+      expect(prefixBytes(buildPrefix(r, ds)).length).toBeLessThan(80_000);
+  });
+
   it('sorts tools by name, marks the design-system block for 1h caching', () => {
     const p = buildPrefix('interactive', ds);
     const names = p.tools.map((t) => t.name);

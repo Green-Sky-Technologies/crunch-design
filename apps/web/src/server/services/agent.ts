@@ -14,6 +14,7 @@ import {
   detectJobRequest,
   encodeSse,
   ModelNotAllowedError,
+  prefixCacheTtl,
   resolveModel,
   runAgentTurn,
   SSE_KEEPALIVE,
@@ -541,7 +542,7 @@ export async function runAssistantMessage(
       gateway: (params, o) => streamModel(db, ctx, params, o, deps.proxy),
       model:
         row.model ?? resolveModel(await getModelSettings(db, actor.workspace.id), 'interactive'),
-      prefix: buildPrefix('interactive', ds.spec),
+      prefix: buildPrefix('interactive', ds.spec, prefixCacheTtl()),
       history,
       userTurn,
       host,

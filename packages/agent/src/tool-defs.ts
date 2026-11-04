@@ -14,10 +14,11 @@ export interface JsonToolDef {
 }
 
 export function jsonSchemaFor(schema: z.ZodType): JsonToolDef['input_schema'] {
-  const js = z.toJSONSchema(schema, { io: 'input', unrepresentable: 'any' }) as Record<
-    string,
-    unknown
-  >;
+  const js = z.toJSONSchema(schema, {
+    io: 'input',
+    unrepresentable: 'any',
+    reused: 'ref',
+  }) as Record<string, unknown>;
   delete js.$schema;
   return sortKeys(js) as JsonToolDef['input_schema'];
 }
