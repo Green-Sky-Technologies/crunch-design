@@ -56,3 +56,14 @@ test('an editor creates a project, edits text on the canvas, and it persists', a
   await page.reload();
   await expect(node(page, SAMPLE.headline)).toHaveText('Second edit');
 });
+
+test('the editor panes fit the viewport (agent pane is not cut off)', async ({ as, run }) => {
+  const page = await as('editor');
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await createProject(page, run.org.slug, uniqueName('Layout'));
+  const viewport = page.viewportSize()!;
+  for (const aside of await page.locator('aside').all()) {
+    const box = (await aside.boundingBox())!;
+    expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 1);
+  }
+});

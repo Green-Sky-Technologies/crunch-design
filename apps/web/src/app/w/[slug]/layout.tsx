@@ -1,5 +1,4 @@
 import { OrganizationSwitcher, UserButton } from '@clerk/nextjs';
-import { can } from '@crunch/authz';
 import Link from 'next/link';
 import { Logo } from '@/components/logo';
 import { WorkspaceNav } from '@/components/workspace-nav';
@@ -27,16 +26,7 @@ export default async function WorkspaceLayout({ children, params }: LayoutProps<
           items={[
             { href: '', label: 'Projects' },
             { href: '/design-systems', label: 'Design systems' },
-            { href: '/settings/members', label: 'Members' },
-            ...(can(actor.role, 'design:edit')
-              ? [{ href: '/settings/figma', label: 'Figma' }]
-              : []),
-            ...(can(actor.role, 'workspace:manage_credentials')
-              ? [
-                  { href: '/settings/credentials', label: 'Model access' },
-                  { href: '/settings/usage', label: 'Usage' },
-                ]
-              : []),
+            { href: '/settings', label: 'Settings' },
           ]}
         />
         <span className="ml-auto rounded-full bg-surface-2 px-2 py-0.5 font-mono text-xs capitalize text-muted">

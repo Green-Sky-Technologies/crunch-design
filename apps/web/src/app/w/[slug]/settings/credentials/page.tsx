@@ -17,7 +17,7 @@ export default async function CredentialsPage({
   ]);
 
   return (
-    <main className="mx-auto w-full max-w-3xl px-6 py-8">
+    <main className="w-full max-w-3xl">
       <h1 className="mb-1 text-2xl font-semibold tracking-tight">Model access</h1>
       <p className="mb-6 text-sm text-muted">
         CrunchDesign is bring-your-own-key. The agent uses this workspace credential for every

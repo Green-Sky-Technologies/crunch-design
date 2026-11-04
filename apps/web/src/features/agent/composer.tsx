@@ -118,17 +118,18 @@ export function Composer({
         </div>
       )}
       {note && <p className="mt-1 text-xs text-muted">{note}</p>}
-      <div className="mt-2 flex items-center gap-2">
+      {/* Fits the 320px pane: buttons keep their size, the model picker shrinks and truncates. */}
+      <div className="mt-2 flex min-w-0 items-center gap-1.5">
         <button
           type="button"
-          className="btn-ghost px-2 py-1 text-xs"
+          className="btn-ghost shrink-0 px-2 py-1 text-xs"
           onClick={() => setShowLink((s) => !s)}
         >
           Link
         </button>
         <button
           type="button"
-          className="btn-ghost px-2 py-1 text-xs"
+          className="btn-ghost shrink-0 px-2 py-1 text-xs"
           onClick={() => fileRef.current?.click()}
         >
           Image
@@ -143,11 +144,11 @@ export function Composer({
             e.target.value = '';
           }}
         />
-        <div className="ml-auto flex items-center gap-2">
-          {modelPicker}
+        <div className="flex min-w-0 flex-1 items-center justify-end gap-1.5">
+          <div className="min-w-0 flex-1">{modelPicker}</div>
           <button
             type="submit"
-            className="btn-primary px-3 py-1 text-xs"
+            className="btn-primary shrink-0 px-3 py-1 text-xs"
             disabled={disabled || !prompt.trim()}
           >
             Send

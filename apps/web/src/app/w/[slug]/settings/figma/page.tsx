@@ -18,7 +18,7 @@ export default async function FigmaSettingsPage({ params }: PageProps<'/w/[slug]
   ]);
 
   return (
-    <main className="mx-auto w-full max-w-3xl px-6 py-8">
+    <main className="w-full max-w-3xl">
       <h1 className="mb-1 text-2xl font-semibold tracking-tight">Figma</h1>
       <p className="mb-6 text-sm text-muted">
         Push designs into Figma, import Figma frames, and sync design tokens with Figma variables

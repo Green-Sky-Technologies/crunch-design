@@ -108,7 +108,8 @@ export function EditorShell() {
           <ExportMenu />
         </div>
       </div>
-      <div className="grid min-h-0 flex-1 grid-cols-[320px_1fr_300px]">
+      {/* One row capped at the available height, so panes scroll instead of growing past the viewport. */}
+      <div className="grid min-h-0 flex-1 grid-cols-[320px_1fr_300px] grid-rows-[minmax(0,1fr)]">
         <aside className="min-h-0 overflow-auto border-r border-border bg-surface">
           <AgentPane />
         </aside>

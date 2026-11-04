@@ -80,14 +80,18 @@ test('a viewer is redirected away from admin settings', async ({ as, run }) => {
     await expect(page).toHaveURL(new RegExp(`/w/${run.org.slug}$`));
   }
   await expect(page.getByRole('heading', { name: 'Projects' })).toBeVisible();
-  const nav = page.getByRole('banner');
-  await expect(nav.getByRole('link', { name: 'Model access' })).toHaveCount(0);
-  await expect(nav.getByRole('link', { name: 'Figma' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'New project' })).toHaveCount(0);
 
-  // Read-only pages open (and don't error) for viewers; the design-system editor is locked.
-  await page.goto(`/w/${run.org.slug}/settings/members`);
+  // Read-only pages open (and don't error) for viewers; settings shows only what they may use.
+  await page.goto(`/w/${run.org.slug}/settings`);
+  await expect(page).toHaveURL(new RegExp(`/w/${run.org.slug}/settings/members$`));
   await expect(page.getByRole('heading', { name: 'Members' })).toBeVisible();
+  const settings = page.getByRole('navigation', { name: 'Settings' });
+  await expect(settings.getByRole('link', { name: 'Members' })).toBeVisible();
+  await expect(settings.getByRole('link', { name: 'Model access' })).toHaveCount(0);
+  await expect(settings.getByRole('link', { name: 'Usage' })).toHaveCount(0);
+  await expect(settings.getByRole('link', { name: 'Figma' })).toHaveCount(0);
+  // The design-system editor is locked for viewers.
   await page.goto(`/w/${run.org.slug}/design-systems`);
   await expect(page.getByRole('heading', { name: 'Design systems' })).toBeVisible();
   await page.getByRole('listitem').filter({ hasText: 'Default' }).getByRole('link').first().click();
@@ -100,14 +104,26 @@ test('a viewer is redirected away from admin settings', async ({ as, run }) => {
 test('an editor has no Model access and is redirected from it', async ({ as, run }) => {
   const page = await as('editor');
   await page.goto(`/w/${run.org.slug}`);
-  const nav = page.getByRole('banner');
-  await expect(nav.getByRole('navigation').getByRole('link', { name: 'Projects' })).toBeVisible();
-  await expect(nav.getByRole('link', { name: 'Model access' })).toHaveCount(0);
-  await expect(nav.getByRole('link', { name: 'Usage' })).toHaveCount(0);
+  const header = page.getByRole('banner');
+  await expect(
+    header.getByRole('navigation').getByRole('link', { name: 'Projects' }),
+  ).toBeVisible();
+  await expect(header.getByRole('link', { name: 'Settings' })).toBeVisible();
+  await page.goto(`/w/${run.org.slug}/settings/members`);
+  const settings = page.getByRole('navigation', { name: 'Settings' });
+  await expect(settings.getByRole('link', { name: 'Figma' })).toBeVisible();
+  await expect(settings.getByRole('link', { name: 'Model access' })).toHaveCount(0);
+  await expect(settings.getByRole('link', { name: 'Usage' })).toHaveCount(0);
   await page.goto(`/w/${run.org.slug}/settings/credentials`);
   await expect(page).toHaveURL(new RegExp(`/w/${run.org.slug}$`));
 
   const admin = await as('admin');
   await admin.goto(`/w/${run.org.slug}`);
-  await expect(admin.getByRole('banner').getByRole('link', { name: 'Model access' })).toBeVisible();
+  await admin.getByRole('banner').getByRole('link', { name: 'Settings' }).click();
+  const adminSettings = admin.getByRole('navigation', { name: 'Settings' });
+  for (const name of ['Members', 'Figma', 'Model access', 'Usage']) {
+    await expect(adminSettings.getByRole('link', { name })).toBeVisible();
+  }
+  await adminSettings.getByRole('link', { name: 'Model access' }).click();
+  await expect(admin.getByRole('heading', { name: 'Model access' })).toBeVisible();
 });

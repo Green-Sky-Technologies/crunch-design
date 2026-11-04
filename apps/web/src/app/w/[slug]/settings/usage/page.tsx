@@ -22,7 +22,7 @@ export default async function Page({
     usageSummary(db(), actor, { days }),
   ]);
   return (
-    <main className="mx-auto w-full max-w-5xl px-6 py-8">
+    <main className="w-full max-w-5xl">
       <h1 className="text-2xl font-semibold tracking-tight">Usage</h1>
       <p className="mt-2 text-sm text-muted">Model usage and estimated cost per member.</p>
       <nav className="mt-3 flex gap-2 text-xs" aria-label="Period">

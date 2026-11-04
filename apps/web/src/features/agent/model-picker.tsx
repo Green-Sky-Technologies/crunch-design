@@ -56,7 +56,7 @@ export function ModelPicker({
   const options = settings.models.filter((m) => m.allowed);
   return (
     <select
-      className="rounded-md border border-border bg-surface px-1.5 py-1 text-xs"
+      className="w-full min-w-0 truncate rounded-md border border-border bg-surface px-1.5 py-1 text-xs"
       aria-label="Model"
       value={value}
       onChange={(e) => onChange(e.target.value)}
