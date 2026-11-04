@@ -18,21 +18,27 @@ export async function snapshotBeforeAgentEdit(
   projectId: string,
   messageId: string,
 ): Promise<string> {
-  const [msg] = await db
-    .select({ snapshot: agentMessages.snapshotVersionId })
-    .from(agentMessages)
-    .where(eq(agentMessages.id, messageId));
-  if (msg?.snapshot) return msg.snapshot;
-  const snap = await createSnapshot(db, actor, projectId, {
-    kind: 'auto',
-    description: 'Before agent change',
-    agentMessageId: messageId,
+  // Row lock on the message: concurrent tool calls (parallel MCP requests) serialize here, so
+  // exactly one snapshot is taken, and none after another caller's first commit.
+  return db.transaction(async (tx) => {
+    const [msg] = await tx
+      .select({ snapshot: agentMessages.snapshotVersionId })
+      .from(agentMessages)
+      .where(eq(agentMessages.id, messageId))
+      .for('update');
+    if (!msg) throw new NotFoundError('Message not found');
+    if (msg.snapshot) return msg.snapshot;
+    const snap = await createSnapshot(tx as unknown as Db, actor, projectId, {
+      kind: 'auto',
+      description: 'Before agent change',
+      agentMessageId: messageId,
+    });
+    await tx
+      .update(agentMessages)
+      .set({ snapshotVersionId: snap.id })
+      .where(and(eq(agentMessages.id, messageId), isNull(agentMessages.snapshotVersionId)));
+    return snap.id;
   });
-  await db
-    .update(agentMessages)
-    .set({ snapshotVersionId: snap.id })
-    .where(and(eq(agentMessages.id, messageId), isNull(agentMessages.snapshotVersionId)));
-  return snap.id;
 }
 
 /** The snapshot a message's edits can be reverted to, for the editor to apply. */

@@ -3,7 +3,7 @@
  * source 'agent' attributed to an agent message (Story 5.3 AC). Used by the interactive path and
  * by the job tool API that sandboxes call.
  */
-import type { ToolHost } from '@crunch/agent';
+import { frameScopeViolation, scopeViolation, type ToolHost } from '@crunch/agent';
 import type { AgentRuntime } from '@crunch/contracts';
 import { assertCan } from '@crunch/authz';
 import { agentMessages, eq, sql, type Db } from '@crunch/db';
@@ -17,7 +17,7 @@ import {
 import { commitTransaction, ConflictError, getDoc } from '../design-docs';
 import { resolveProjectDesignSystem } from '../project-design-system';
 import { getProject } from '../projects';
-import type { Actor } from '../types';
+import { ValidationError, type Actor } from '../types';
 
 export interface DbToolHostOptions {
   projectId: string;
@@ -25,6 +25,7 @@ export interface DbToolHostOptions {
   agentMessageId: string;
   runtime: AgentRuntime;
   scope?: ToolHost['scope'];
+  frameScope?: ToolHost['frameScope'];
   maxOpsPerPatch?: number;
   /** Runs once, before the first transaction (auto snapshot, Story 5.12). */
   beforeFirstCommit?: () => Promise<void>;
@@ -46,10 +47,23 @@ export async function createDbToolHost(
   let committed = false;
 
   const load = async () => (state ??= await getDoc(db, actor, opts.projectId));
+  const frameScope = opts.frameScope
+    ? { ...opts.frameScope, createdFrameIds: [...(opts.frameScope.createdFrameIds ?? [])] }
+    : undefined;
+
+  /** Scope is enforced against the doc each commit applies to, including after a conflict. */
+  const assertInScope = (doc: DesignDoc, ops: DocOp[]) => {
+    const why =
+      (opts.scope && !opts.scope.allowWider
+        ? scopeViolation(doc, opts.scope.rootNodeId, ops)
+        : null) ?? (frameScope ? frameScopeViolation(doc, frameScope, ops) : null);
+    if (why) throw new ValidationError(`Out of scope: ${why}`);
+  };
 
   return {
     runtime: opts.runtime,
     scope: opts.scope,
+    frameScope,
     maxOpsPerPatch: opts.maxOpsPerPatch,
     onFrameCreated: opts.onFrameCreated,
     getDoc: async () => (await load()).doc,
@@ -63,8 +77,10 @@ export async function createDbToolHost(
       const txn = { id: agentTxnId(), source: 'agent' as const, label: label.slice(0, 200), ops };
       let result;
       try {
+        const current = await load();
+        assertInScope(current.doc, ops);
         result = await commitTransaction(db, actor, opts.projectId, {
-          baseVersion: (await load()).version,
+          baseVersion: current.version,
           txn,
           agentMessageId: opts.agentMessageId,
         });
@@ -72,8 +88,10 @@ export async function createDbToolHost(
         if (!(e instanceof ConflictError)) throw e;
         // Someone else wrote meanwhile: ops are re-validated against the latest doc.
         state = null;
+        const fresh = await load();
+        assertInScope(fresh.doc, ops); // the other write may have moved nodes out of scope
         result = await commitTransaction(db, actor, opts.projectId, {
-          baseVersion: (await load()).version,
+          baseVersion: fresh.version,
           txn,
           agentMessageId: opts.agentMessageId,
         });

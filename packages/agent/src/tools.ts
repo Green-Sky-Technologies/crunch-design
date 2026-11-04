@@ -35,6 +35,12 @@ export interface ToolHost {
   commit(ops: DocOp[], label: string): Promise<{ version: number; txnId: string }>;
   /** Restrict edits to one subtree (inline "ask agent", Story 5.7). */
   scope?: { rootNodeId: string; allowWider: boolean };
+  /**
+   * Restrict edits to whole frames (background jobs, Story 5.5): only `frameIds` (and frames
+   * created by this job, listed in `createdFrameIds`) may change. `allowNewFrames` permits
+   * insert_frame. Token overrides affect every frame, so they're rejected under a frame scope.
+   */
+  frameScope?: { frameIds: string[]; createdFrameIds?: string[]; allowNewFrames: boolean };
   /** Linter (defaults to @crunch/ds-lint). */
   lint?: LintDoc;
   /** Max ops per patch_nodes call (the interactive path keeps patches small). */
@@ -105,6 +111,70 @@ export function scopeViolation(doc: DesignDoc, rootNodeId: string, ops: DocOp[])
     if (op.op === 'moveNode' && op.id === rootNodeId) return `op ${i} moves the scoped node itself`;
     for (const id of touchedNodeIds(op))
       if (!allowed.has(id)) return `op ${i} (${op.op}) touches ${id}, outside ${rootNodeId}`;
+  }
+  return null;
+}
+
+/** Root id → frame id for a doc. */
+function frameOfNode(doc: DesignDoc, id: string): string | null {
+  let cur: string | null = id;
+  let root = id;
+  while (cur) {
+    root = cur;
+    cur = doc.nodes[cur]?.parentId ?? null;
+  }
+  return doc.frames.find((f) => f.rootNodeId === root)?.id ?? null;
+}
+
+/**
+ * Check that ops only change allowed frames (frame-scoped jobs). Nodes inserted by the same
+ * batch count as inside their parent's frame; frames inserted by the batch become allowed when
+ * new frames are. Returns a reason when the scope is violated.
+ */
+export function frameScopeViolation(
+  doc: DesignDoc,
+  scope: NonNullable<ToolHost['frameScope']>,
+  ops: DocOp[],
+): string | null {
+  const frames = new Set([...scope.frameIds, ...(scope.createdFrameIds ?? [])]);
+  const newNodeFrame = new Map<string, string>();
+  const frameFor = (id: string) => newNodeFrame.get(id) ?? frameOfNode(doc, id);
+  const allowedNode = (id: string) => {
+    const f = frameFor(id);
+    return f !== null && frames.has(f);
+  };
+  for (const [i, op] of ops.entries()) {
+    switch (op.op) {
+      case 'insertFrame':
+        if (!scope.allowNewFrames)
+          return `op ${i} creates a frame; this job may only edit its target frames`;
+        frames.add(op.frame.id);
+        for (const n of op.nodes) newNodeFrame.set(n.id, op.frame.id);
+        continue;
+      case 'removeFrame':
+      case 'updateFrame':
+      case 'moveFrame':
+        if (!frames.has(op.id))
+          return `op ${i} (${op.op}) changes frame ${op.id}, outside this job's frames`;
+        continue;
+      case 'setTokenOverride':
+        return `op ${i} overrides a token, which changes every frame`;
+      case 'upsertSlider':
+      case 'removeSlider':
+      case 'setSliderValue':
+        continue;
+      case 'insertSubtree': {
+        if (!allowedNode(op.parentId))
+          return `op ${i} inserts into ${op.parentId}, outside this job's frames`;
+        const f = frameFor(op.parentId)!;
+        for (const n of op.nodes) newNodeFrame.set(n.id, f);
+        continue;
+      }
+      default:
+        for (const id of touchedNodeIds(op))
+          if (!allowedNode(id))
+            return `op ${i} (${op.op}) touches ${id}, outside this job's frames`;
+    }
   }
   return null;
 }
@@ -218,6 +288,10 @@ async function run(host: ToolHost, name: AgentToolName, raw: unknown): Promise<T
             `Out of scope: ${why}. Only edit inside the selected element, or ask the user to approve a wider change.`,
           );
       }
+      if (host.frameScope) {
+        const why = frameScopeViolation(await host.getDoc(), host.frameScope, input.ops);
+        if (why) throw new ToolError(`Out of scope: ${why}.`);
+      }
       const res = await host.commit(input.ops, input.label);
       return ok(
         { ok: true, version: res.version, touched: opsTouched(input.ops) },
@@ -229,10 +303,15 @@ async function run(host: ToolHost, name: AgentToolName, raw: unknown): Promise<T
       const input = parse(name, raw);
       if (scope)
         throw new ToolError('Out of scope: creating frames needs a wider change approval.');
+      if (host.frameScope && !host.frameScope.allowNewFrames)
+        throw new ToolError(
+          'Out of scope: this job edits its target frames in place; it cannot add frames.',
+        );
       const doc = await host.getDoc();
       const frame = frameWithPlacement(doc, input.frame);
       const op: DocOp = { op: 'insertFrame', index: doc.frames.length, frame, nodes: input.nodes };
       const res = await host.commit([op], `Add frame “${frame.name}”`);
+      host.frameScope?.createdFrameIds?.push(frame.id);
       await host.onFrameCreated?.(frame);
       const touched = input.nodes.map((n) => n.id);
       return ok(

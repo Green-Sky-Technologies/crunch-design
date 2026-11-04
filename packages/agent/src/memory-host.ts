@@ -19,13 +19,14 @@ export interface MemoryHost extends ToolHost {
 export function memoryHost(
   doc: DesignDoc,
   ds: DesignSystemSpec,
-  opts: Partial<Pick<ToolHost, 'scope' | 'maxOpsPerPatch' | 'lint'>> & {
+  opts: Partial<Pick<ToolHost, 'scope' | 'frameScope' | 'maxOpsPerPatch' | 'lint'>> & {
     runtime?: AgentRuntime;
   } = {},
 ): MemoryHost {
   const host: MemoryHost = {
     runtime: opts.runtime ?? 'interactive',
     scope: opts.scope,
+    frameScope: opts.frameScope,
     maxOpsPerPatch: opts.maxOpsPerPatch,
     lint: opts.lint,
     doc,

@@ -5,13 +5,35 @@
  * touches the database or any credential.
  */
 import { contractToolDefs, executeTool, type ToolHost } from '@crunch/agent';
-import { agentMessages, eq, type Db } from '@crunch/db';
+import type { JobInput, JobKind } from '@crunch/contracts';
+import { agentMessages, and, eq, jobEvents, type Db } from '@crunch/db';
 import { appendJobEvent, jobActor, touchJobHeartbeat } from '../jobs';
 import { JobTokenError, tokenFromHeaders, verifyJobToken } from './job-tokens';
 import { snapshotBeforeAgentEdit } from './snapshots';
 import { createDbToolHost } from './tool-host';
 
 const PROTOCOL_VERSION = '2025-06-18';
+
+/**
+ * Structural scope for generation jobs (not just a prompt instruction): redesign edits only
+ * its target frames in place; generate and alternatives may only add frames and edit the ones
+ * they created, never existing frames.
+ */
+export function jobFrameScope(
+  kind: JobKind,
+  input: unknown,
+  createdFrameIds: string[],
+): ToolHost['frameScope'] {
+  if (kind === 'redesign')
+    return {
+      frameIds: (input as JobInput<'redesign'>).frameIds,
+      createdFrameIds,
+      allowNewFrames: false,
+    };
+  if (kind === 'alternatives' || kind === 'generate')
+    return { frameIds: [], createdFrameIds, allowNewFrames: true };
+  return undefined;
+}
 
 interface RpcRequest {
   jsonrpc: '2.0';
@@ -67,10 +89,19 @@ export async function handleJobMcp(db: Db, req: Request, jobId: string): Promise
       .limit(1);
     if (!msg) throw new Error('This job has no agent message to attribute edits to');
     const actor = await jobActor(db, job);
+    const created = await db
+      .select({ data: jobEvents.data })
+      .from(jobEvents)
+      .where(and(eq(jobEvents.jobId, job.id), eq(jobEvents.type, 'frame')));
     host = await createDbToolHost(db, actor, {
       projectId: job.projectId,
       agentMessageId: msg.id,
       runtime: 'job',
+      frameScope: jobFrameScope(
+        job.kind,
+        job.input,
+        created.map((r) => String((r.data as { frameId?: unknown }).frameId)),
+      ),
       beforeFirstCommit: () =>
         snapshotBeforeAgentEdit(db, actor, job.projectId!, msg.id).then(() => undefined),
       onFrameCreated: async (f) =>
