@@ -12,6 +12,7 @@ import {
   listShareLinks,
   RateLimiter,
   resolveShareToken,
+  shareRateKey,
   revokeShareLink,
   updateShareLink,
 } from '@/server/services/share-links';
@@ -219,10 +220,35 @@ describe('share viewer helpers', () => {
     expect(rl.check('a', 1).ok).toBe(true); // 'a' was evicted
   });
 
-  it('reads the client IP from proxy headers', () => {
-    expect(clientIp(new Headers({ 'x-forwarded-for': '1.2.3.4, 10.0.0.1' }))).toBe('1.2.3.4');
-    expect(clientIp(new Headers({ 'x-real-ip': '5.6.7.8' }))).toBe('5.6.7.8');
-    expect(clientIp(new Headers())).toBe('unknown');
+  it("keeps repeat clients' counters when flooded with one-off random keys", () => {
+    const rl = new RateLimiter(3, 60_000, 50);
+    for (let t = 0; t < 3; t++) expect(rl.check('ip:abuser', t).ok).toBe(true);
+    expect(rl.check('ip:abuser', 3).ok).toBe(false);
+    for (let i = 0; i < 10_000; i++) rl.check(`ip:random-${i}`, 10 + i / 1000);
+    expect(rl.check('ip:abuser', 20).ok).toBe(false); // still limited: not evicted
+    expect(rl.size).toBeLessThanOrEqual(100); // memory stays bounded
+  });
+
+  it('prefers platform-set IP headers over the client-controlled leftmost x-forwarded-for', () => {
+    // Vercel sets x-real-ip; a spoofed leftmost XFF entry is ignored.
+    expect(
+      clientIp(new Headers({ 'x-real-ip': '5.6.7.8', 'x-forwarded-for': '6.6.6.6, 5.6.7.8' })),
+    ).toBe('5.6.7.8');
+    expect(clientIp(new Headers({ 'x-vercel-forwarded-for': '9.9.9.9' }))).toBe('9.9.9.9');
+    // Without platform headers, trust only the entry the nearest proxy appended (rightmost).
+    expect(clientIp(new Headers({ 'x-forwarded-for': '6.6.6.6, 10.0.0.1' }))).toBe('10.0.0.1');
+    expect(clientIp(new Headers({ 'x-real-ip': 'not an ip; drop table' }))).toBeNull();
+    expect(clientIp(new Headers())).toBeNull();
+  });
+
+  it('falls back to a per-token bucket when the IP is unknown (no shared "unknown" bucket)', () => {
+    const none = new Headers();
+    const a = shareRateKey(none, 'A'.repeat(43));
+    const b = shareRateKey(none, 'B'.repeat(43));
+    expect(a).not.toBe(b);
+    expect(a).toMatch(/^token:[0-9a-f]{32}$/);
+    expect(a).not.toContain('A'.repeat(10)); // the raw token is never used as a key
+    expect(shareRateKey(new Headers({ 'x-real-ip': '1.2.3.4' }), 'x')).toBe('ip:1.2.3.4');
   });
 
   it('sends noindex, no-store and a script-free CSP', () => {

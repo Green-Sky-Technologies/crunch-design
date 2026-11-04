@@ -1,12 +1,13 @@
 /**
  * GET /s/:token — share viewer (Story 6.3).
  * Public links render without auth; workspace links require a signed-in member of the link's
- * workspace. Every failure returns the same 404 page. Rate-limited per client IP; noindex.
+ * workspace. Every failure returns the same 404 page. Rate-limited per client IP (per token
+ * when no IP is available; see the deployment note in services/share-links.ts); noindex.
  */
 import { getDb } from '@crunch/db';
 import type { NextRequest } from 'next/server';
 import { getActor } from '@/server/context';
-import { clientIp, resolveShareToken, shareViewLimiter } from '@/server/services/share-links';
+import { resolveShareToken, shareRateKey, shareViewLimiter } from '@/server/services/share-links';
 import type { Actor } from '@/server/services/types';
 import { NotFoundError } from '@/server/services/types';
 import { renderShareError, renderSharePage, shareHeaders } from './share-html';
@@ -14,14 +15,14 @@ import { renderShareError, renderSharePage, shareHeaders } from './share-html';
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest, ctx: RouteContext<'/s/[token]'>) {
-  const limit = shareViewLimiter.check(clientIp(req.headers));
+  const { token } = await ctx.params;
+  const limit = shareViewLimiter.check(shareRateKey(req.headers, token));
   if (!limit.ok)
     return new Response(renderShareError({ status: 429, retryAfterSec: limit.retryAfterSec }), {
       status: 429,
       headers: shareHeaders({ 'retry-after': String(limit.retryAfterSec) }),
     });
 
-  const { token } = await ctx.params;
   let viewer: Actor | null = null;
   try {
     viewer = await getActor();

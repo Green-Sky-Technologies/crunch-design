@@ -328,11 +328,23 @@ export async function resolveShareToken(
 }
 
 // ---------------------------------------------------------------------------------------------
-// Rate limiting for the public viewer (in-memory, per server instance; fine for v1).
+// Rate limiting for the public viewer.
+//
+// v1 is in-memory, per server instance (a shared store is tracked under Story 9.3).
+// Deployment assumption: the app runs on Vercel, which sets `x-real-ip` (and
+// `x-vercel-forwarded-for`) from the TCP peer and overwrites client-sent values. Elsewhere, put
+// it behind exactly one trusted proxy that sets `x-real-ip` or appends to `x-forwarded-for`.
 // ---------------------------------------------------------------------------------------------
 
+/**
+ * Sliding-window limiter with segmented eviction: a key starts in a small "probation" map and
+ * is promoted to the "protected" map on its second hit in the window. A flood of one-off random
+ * keys only churns probation, so the counters of clients that actually repeat (the ones being
+ * limited) are not evicted and reset.
+ */
 export class RateLimiter {
-  private hits = new Map<string, number[]>();
+  private probation = new Map<string, number[]>();
+  private protected = new Map<string, number[]>();
   constructor(
     private readonly limit: number,
     private readonly windowMs: number,
@@ -342,29 +354,77 @@ export class RateLimiter {
   /** Record a hit; returns whether it's allowed and when to retry if not. */
   check(key: string, now = Date.now()): { ok: boolean; retryAfterSec: number } {
     const since = now - this.windowMs;
-    const list = (this.hits.get(key) ?? []).filter((t) => t > since);
+    const inProtected = this.protected.has(key);
+    const list = ((inProtected ? this.protected : this.probation).get(key) ?? []).filter(
+      (t) => t > since,
+    );
     if (list.length >= this.limit) {
-      this.hits.set(key, list);
+      this.protected.delete(key);
+      this.protected.set(key, list);
       return { ok: false, retryAfterSec: Math.max(1, Math.ceil((list[0]! - since) / 1000)) };
     }
     list.push(now);
-    this.hits.delete(key); // re-insert to keep Map order ≈ LRU
-    this.hits.set(key, list);
-    if (this.hits.size > this.maxKeys) {
-      const oldest = this.hits.keys().next().value;
-      if (oldest !== undefined) this.hits.delete(oldest);
-    }
+    this.probation.delete(key);
+    this.protected.delete(key);
+    if (list.length >= 2 || inProtected) this.protected.set(key, list);
+    else this.probation.set(key, list); // re-insert: Map order ≈ LRU
+    this.evict(since);
     return { ok: true, retryAfterSec: 0 };
+  }
+
+  /** Number of tracked keys (tests, metrics). */
+  get size(): number {
+    return this.probation.size + this.protected.size;
+  }
+
+  private evict(since: number) {
+    while (this.probation.size > this.maxKeys) {
+      const oldest = this.probation.keys().next().value;
+      if (oldest === undefined) break;
+      this.probation.delete(oldest);
+    }
+    if (this.protected.size <= this.maxKeys) return;
+    // Drop keys whose window has fully expired before evicting any live counter.
+    for (const [k, hits] of this.protected)
+      if (!hits.some((t) => t > since)) this.protected.delete(k);
+    while (this.protected.size > this.maxKeys) {
+      const oldest = this.protected.keys().next().value;
+      if (oldest === undefined) break;
+      this.protected.delete(oldest);
+    }
   }
 }
 
 const g = globalThis as unknown as { __crunchShareLimiter?: RateLimiter };
-/** 60 views per minute per client IP. */
+/** 60 views per minute per client (per instance). */
 export const shareViewLimiter = (g.__crunchShareLimiter ??= new RateLimiter(60, 60_000));
 
-/** Best-effort client IP from proxy headers (Vercel sets x-forwarded-for / x-real-ip). */
-export function clientIp(headers: Headers): string {
+const IP_RE = /^[0-9a-fA-F:.]{2,45}$/;
+const validIp = (v: string | null | undefined) => {
+  const t = v?.trim();
+  return t && IP_RE.test(t) ? t : null;
+};
+
+/**
+ * Client IP from platform-set headers, or null if unknown. Prefers `x-real-ip` and
+ * `x-vercel-forwarded-for` (set by Vercel, not spoofable there). For `x-forwarded-for` it takes
+ * the rightmost entry (added by the nearest trusted proxy), never the client-controlled leftmost.
+ */
+export function clientIp(headers: Headers): string | null {
+  const real = validIp(headers.get('x-real-ip'));
+  if (real) return real;
+  const vercel = validIp(headers.get('x-vercel-forwarded-for')?.split(',')[0]);
+  if (vercel) return vercel;
   const xff = headers.get('x-forwarded-for');
-  if (xff) return xff.split(',')[0]!.trim() || 'unknown';
-  return headers.get('x-real-ip')?.trim() || 'unknown';
+  if (xff) return validIp(xff.split(',').at(-1));
+  return null;
+}
+
+/**
+ * Limiter key for a share-view request: the client IP, or, when no IP is available, a bucket
+ * per share token, so one anonymous client can't exhaust a shared bucket for everyone.
+ */
+export function shareRateKey(headers: Headers, token: string): string {
+  const ip = clientIp(headers);
+  return ip ? `ip:${ip}` : `token:${hashShareToken(token).slice(0, 32)}`;
 }
