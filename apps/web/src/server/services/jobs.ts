@@ -38,6 +38,7 @@ import {
 } from '@crunch/db';
 import { z } from 'zod';
 import { revokeJobTokens, verifyJobToken, JobTokenError } from './agent/job-tokens';
+import { settleStaleMessages } from './agent/stale';
 import { getProject } from './projects';
 import { NotFoundError, ValidationError, type Actor } from './types';
 
@@ -475,6 +476,8 @@ export interface ReapSummary {
   orphaned: string[];
   retried: string[];
   started: string[];
+  /** Interactive replies settled because their function died mid-turn. */
+  settledMessages?: number;
 }
 
 export async function reapJobs(db: Db, deps: JobDeps): Promise<ReapSummary> {
@@ -546,6 +549,7 @@ export async function reapJobs(db: Db, deps: JobDeps): Promise<ReapSummary> {
     .where(and(eq(jobs.status, 'queued'), lt(jobs.updatedAt, new Date(now.getTime() - 15_000))))
     .limit(50);
   for (const { id } of queued) if (await startJob(db, id, deps)) out.started.push(id);
+  out.settledMessages = await settleStaleMessages(db, { now });
   return out;
 }
 

@@ -42,6 +42,7 @@ import { resolveProjectDesignSystem } from './project-design-system';
 import { getProject } from './projects';
 import { getModelSettings } from './agent/model-settings';
 import { snapshotBeforeAgentEdit } from './agent/snapshots';
+import { settleStaleMessages } from './agent/stale';
 import { createDbToolHost } from './agent/tool-host';
 import { ProviderError, streamModel, type LlmProxyDeps } from './llm-proxy';
 import { NotFoundError, ValidationError, type Actor } from './types';
@@ -190,6 +191,11 @@ export async function loadMessage(db: Db, actor: Actor, messageId: string) {
 }
 
 /** The project's main chat (unscoped), with its messages. */
+/** Interactive turns stop themselves after this (the messages route allows 300s). */
+export const TURN_DEADLINE_MS = 270_000;
+const TIMEOUT_ERROR = 'The reply took too long and was stopped.';
+export { settleStaleMessages, STALE_TURN_MS } from './agent/stale';
+
 export async function getProjectChat(
   db: Db,
   actor: Actor,
@@ -211,6 +217,7 @@ export async function getProjectChat(
     .orderBy(desc(agentConversations.updatedAt))
     .limit(1);
   if (!conv) return { conversationId: null, messages: [] };
+  await settleStaleMessages(db, { conversationId: conv.id });
   return { conversationId: conv.id, messages: await listMessages(db, actor, conv.id) };
 }
 
@@ -448,6 +455,8 @@ export interface RunDeps {
   flushMs?: number;
   /** How often to check for cancellation while the model is thinking (ms). */
   cancelPollMs?: number;
+  /** Hard limit for the turn, below the route's maxDuration (300s). */
+  deadlineMs?: number;
   /** Runs before the message's first transaction. Defaults to the auto snapshot (Story 5.12). */
   beforeFirstCommit?: (messageId: string) => Promise<void>;
 }
@@ -509,6 +518,12 @@ export async function runAssistantMessage(
     return writing;
   };
   const poll = setInterval(() => void checkCancelled().catch(() => {}), deps.cancelPollMs ?? 1000);
+  // Settle the message ourselves before the platform kills the function at maxDuration.
+  let timedOut = false;
+  const deadline = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, deps.deadlineMs ?? TURN_DEADLINE_MS);
 
   let final: {
     status: 'complete' | 'error' | 'cancelled';
@@ -565,7 +580,7 @@ export async function runAssistantMessage(
       },
     });
     final = {
-      status: controller.signal.aborted ? 'cancelled' : 'complete',
+      status: timedOut ? 'error' : controller.signal.aborted ? 'cancelled' : 'complete',
       content: {
         v: 1,
         turns: result.turns,
@@ -574,15 +589,16 @@ export async function runAssistantMessage(
         jobSuggestion: result.jobSuggestion,
         stopReason: result.stopReason,
       },
-      error:
-        result.stopReason === 'refusal'
+      error: timedOut
+        ? TIMEOUT_ERROR
+        : result.stopReason === 'refusal'
           ? 'The model declined this request.'
           : result.stopReason === 'max_iterations'
             ? 'Stopped after too many steps.'
             : null,
     };
   } catch (e) {
-    const aborted = controller.signal.aborted;
+    const aborted = controller.signal.aborted && !timedOut;
     if (!aborted) console.error('[agent] turn failed', e instanceof Error ? e.name : typeof e);
     const u = lastUpdate as TurnUpdate | null;
     final = {
@@ -593,10 +609,11 @@ export async function runAssistantMessage(
         partial: u?.partial ?? null,
         activity: u?.activity ?? [],
       },
-      error: aborted ? null : userFacingError(e),
+      error: aborted ? null : timedOut ? TIMEOUT_ERROR : userFacingError(e),
     };
   } finally {
     clearInterval(poll);
+    clearTimeout(deadline);
   }
   await writing.catch(() => {});
   // A user cancel wins over completion; otherwise write the final state.
@@ -660,7 +677,10 @@ export async function* messageEvents(
   let n = 0;
   yield encodeSse({ retry: 1000, data: { messageId }, event: 'open' });
   while (!opts.signal?.aborted) {
-    const view = toMessageView(await loadMessage(db, actor, messageId));
+    let row = await loadMessage(db, actor, messageId);
+    if (!TERMINAL.has(row.status) && (await settleStaleMessages(db, { messageId })))
+      row = await loadMessage(db, actor, messageId);
+    const view = toMessageView(row);
     const json = JSON.stringify(view);
     if (json !== last) {
       last = json;
