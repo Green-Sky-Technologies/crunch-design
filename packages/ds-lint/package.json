@@ -1,0 +1,17 @@
+{
+  "name": "@crunch/ds-lint",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "test": "vitest run --passWithNoTests",
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "@crunch/contracts": "workspace:*",
+    "@crunch/doc-model": "workspace:*"
+  }
+}
