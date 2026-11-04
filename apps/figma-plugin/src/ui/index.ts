@@ -2,5 +2,6 @@
 import { start } from './main';
 import './push';
 import './import';
+import './tokens';
 
 start();

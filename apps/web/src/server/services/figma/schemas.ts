@@ -1,4 +1,5 @@
 /** Zod schemas and size limits for inbound plugin payloads (Epic 8). */
+import { variablesSnapshot } from '@crunch/figma-convert';
 import { z } from 'zod';
 
 export const KB = 1024;
@@ -59,6 +60,24 @@ export const importRequest = z
   .strict();
 
 export const importUrlRequest = z.object({ url: z.string().max(2000) }).strict();
+
+/** Token sync (Story 8.4): the plugin's variables snapshot plus the user's selections. */
+export const SYNC_MAX_BYTES = 4 * MB;
+export const syncRequest = z
+  .object({
+    fileKey: figmaFileKey,
+    direction: z.enum(['pull', 'push']).default('pull'),
+    snapshot: variablesSnapshot,
+    selected: z.array(z.string().max(300)).max(10_000).default([]),
+    resolutions: z
+      .record(z.string().max(300), z.enum(['ours', 'theirs']))
+      .refine((m) => Object.keys(m).length <= 10_000, 'Too many resolutions')
+      .default({}),
+  })
+  .strict();
+export const syncResultRequest = z
+  .object({ fileKey: figmaFileKey, snapshot: variablesSnapshot })
+  .strict();
 
 export const PUSH_RESULT_MAX_BYTES = 2 * MB;
 export const pushResultRequest = z

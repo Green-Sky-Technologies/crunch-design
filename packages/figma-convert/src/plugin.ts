@@ -5,4 +5,5 @@
 export * from './plan';
 export * from './reconcile';
 export * from './serialize';
+export * from './sync-types';
 export type { FigmaNode, FigmaPaint } from './figma-node';

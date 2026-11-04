@@ -13,3 +13,5 @@ export * from './to-figma';
 export * from './figma-node';
 export * from './from-figma';
 export * from './serialize';
+export * from './sync-types';
+export * from './token-sync';

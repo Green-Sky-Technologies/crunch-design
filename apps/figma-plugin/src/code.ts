@@ -5,7 +5,10 @@
  * @crunch/figma-convert as pure, tested functions.
  */
 import { applyPushPlan } from './main/push';
+import { collector } from './main/note';
+import { readVariablesSnapshot } from './main/read-variables';
 import { serializeSelection } from './main/selection';
+import { upsertVariables } from './main/variables';
 import type { FileInfo, Settings, ToMain, ToUi } from './shared/messages';
 
 const SETTINGS_KEY = 'crunchdesign.settings.v1';
@@ -91,6 +94,26 @@ async function handle(msg: ToMain) {
       post({ type: 'progress', message: 'Reading selection…' });
       const payload = await serializeSelection();
       post({ type: 'selection', payload, file: fileInfo() });
+      return;
+    }
+    case 'read-variables':
+      post({ type: 'variables', snapshot: await readVariablesSnapshot(), file: fileInfo() });
+      return;
+    case 'apply-variables': {
+      const { items, note } = collector();
+      const remove = (msg.remove ?? []).slice(0, 5000);
+      const r = await upsertVariables(msg.variables, note, { remove });
+      post({
+        type: 'variables-applied',
+        snapshot: await readVariablesSnapshot(),
+        report: items,
+        created: r.created,
+        updated: r.updated,
+        removed: remove.length,
+      });
+      figma.notify(
+        `Variables: ${r.created} created, ${r.updated} updated, ${remove.length} removed`,
+      );
       return;
     }
     case 'close':

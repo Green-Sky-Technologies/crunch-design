@@ -86,6 +86,16 @@ export class Api {
       stats: { nodes: number; tokens: number; svgs: number; images: number };
     }>(`/projects/${encodeURIComponent(projectId)}/import`, { method: 'POST', body });
   }
+  variables<T>(
+    projectId: string,
+    step: 'diff' | 'pull' | 'push-plan' | 'push-result',
+    body: unknown,
+  ) {
+    return this.request<T>(`/projects/${encodeURIComponent(projectId)}/variables/${step}`, {
+      method: 'POST',
+      body,
+    });
+  }
   pushResult(
     projectId: string,
     body: {
