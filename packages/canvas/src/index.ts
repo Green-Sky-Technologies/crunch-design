@@ -7,3 +7,4 @@ export * from './camera';
 export * from './frames';
 export * from './minimap';
 export * from './tree';
+export * from './inspector';

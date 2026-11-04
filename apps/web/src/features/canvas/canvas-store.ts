@@ -9,6 +9,7 @@
  * writing `transform` directly, so frames never re-render for camera moves (ADR 0001).
  */
 import { type Camera } from '@crunch/canvas';
+import type { Breakpoint } from '@crunch/doc-model';
 import { useStore } from 'zustand';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import { useDocStoreApi, type DocStore } from '../doc-store';
@@ -35,6 +36,9 @@ export interface CanvasState {
   /** Live preview of a frame move/resize gesture (committed as one op on release). */
   framePreview: { frameId: string; dx: number; dy: number; width?: number } | null;
   setFramePreview(p: CanvasState['framePreview']): void;
+  /** Breakpoint the inspector edits; null follows the selected frame's breakpoint. */
+  editBreakpoint: Breakpoint | null;
+  setEditBreakpoint(bp: Breakpoint | null): void;
   setCamera(c: Camera): void;
   setViewport(s: Size): void;
   setSize(frameId: string, s: Size): void;
@@ -58,6 +62,8 @@ export function createCanvasStore(): CanvasStore {
     fitted: false,
     layersOpen: true,
     framePreview: null,
+    editBreakpoint: null,
+    setEditBreakpoint: (editBreakpoint) => set({ editBreakpoint }),
     setFramePreview: (framePreview) => set({ framePreview }),
     setCamera: (camera) => set({ camera }),
     setViewport: (viewport) => set({ viewport }),

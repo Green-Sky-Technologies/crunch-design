@@ -7,17 +7,7 @@
 import { useDocStore } from '../doc-store';
 
 export { CanvasPane } from './canvas-pane';
-
-export function InspectorPane() {
-  const selection = useDocStore((s) => s.selection);
-  return (
-    <div className="p-4 text-sm text-muted">
-      {selection.nodeIds.length
-        ? `${selection.nodeIds.length} selected`
-        : 'Select an element to edit it (Epic 3).'}
-    </div>
-  );
-}
+export { InspectorPane } from './inspector';
 
 export function EditLockIndicator() {
   const readOnly = useDocStore((s) => s.readOnly);
