@@ -10,7 +10,7 @@ import {
   getOpsSince,
   LockedError,
 } from '@/server/services/design-docs';
-import { createProject, duplicateProject } from '@/server/services/projects';
+import { createProject, duplicateProject, setProjectArchived } from '@/server/services/projects';
 import {
   createSnapshot,
   getSnapshotDoc,
@@ -231,5 +231,21 @@ describe('snapshots', () => {
     await expect(getSnapshotDoc(db, editor, project.id, 'nope')).rejects.toBeInstanceOf(
       NotFoundError,
     );
+  });
+
+  it('rejects edits to archived projects until they are restored', async () => {
+    const { editor, project, rootId } = await setup();
+    await setProjectArchived(db, editor, project.id, true);
+    await expect(
+      commitTransaction(db, editor, project.id, {
+        baseVersion: 0,
+        txn: txn([{ op: 'setNodeMeta', id: rootId, patch: { name: 'x' } }]),
+      }),
+    ).rejects.toThrow(/archived/);
+    await setProjectArchived(db, editor, project.id, false);
+    await commitTransaction(db, editor, project.id, {
+      baseVersion: 0,
+      txn: txn([{ op: 'setNodeMeta', id: rootId, patch: { name: 'x' } }]),
+    });
   });
 });

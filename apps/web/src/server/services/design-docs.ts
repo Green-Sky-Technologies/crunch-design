@@ -125,7 +125,10 @@ export async function commitTransaction(
   if (txn.source === 'agent' && !input.agentMessageId) {
     throw new ValidationError('Agent transactions must reference an agent message');
   }
-  await getProject(db, actor, projectId);
+  const project = await getProject(db, actor, projectId);
+  // Archived projects are read-only: restore the project first.
+  if (project.archivedAt)
+    throw new ValidationError('This project is archived. Restore it to edit.');
   await ensureDoc(db, actor, projectId);
   await assertNotLockedByOther(db, actor, projectId);
 
