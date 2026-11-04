@@ -122,19 +122,42 @@ describe('beta allowlist', () => {
     expect(client.calls).toHaveLength(0);
   });
 
-  it('forwards allowed betas and drops unknown ones', async () => {
+  it('forwards every non-forbidden beta Claude Code sends (regression: jobs 400ed)', async () => {
+    // Captured from Agent SDK 0.3.318. It pairs `thinking.display: "updates"` with the
+    // thinking-display-updates beta; dropping that beta made every job request fail with a 400.
+    const claudeCodeBetas =
+      'claude-code-20250219,interleaved-thinking-2025-05-14,context-management-2025-06-27,per-turn-control-2026-07-01,mid-conversation-tool-changes-2026-07-01,thinking-token-count-2026-05-13,effort-2025-11-24,thinking-display-updates-2026-08-18';
     const { token } = await setupJob();
     const client = scriptedClient([{ content: [textBlock('x')] }]);
     const res = await handleMessagesProxy(
       db,
-      post(token, base, {
-        'anthropic-beta': 'interleaved-thinking-2025-05-14, some-new-beta-2026-12-01',
-      }),
+      post(
+        token,
+        { ...base, thinking: { type: 'adaptive', display: 'updates' } },
+        { 'anthropic-beta': claudeCodeBetas },
+      ),
       { loadClient: async () => ({ messages: client.messages, provider: 'anthropic' }) },
     );
     expect(res.status).toBe(200);
-    expect(client.headers[0]).toEqual({ 'anthropic-beta': 'interleaved-thinking-2025-05-14' });
-    expect(filterBetas('unknown-only-2026-01-01')).toBeUndefined();
+    expect(client.headers[0]).toEqual({ 'anthropic-beta': claudeCodeBetas });
+    expect(filterBetas('some-new-beta-2026-12-01, some-new-beta-2026-12-01')).toBe(
+      'some-new-beta-2026-12-01',
+    );
+  });
+
+  it('still rejects dangerous or malformed betas', () => {
+    for (const b of [
+      'mcp-client-2025-11-20',
+      'fast-mode-2026-02-01',
+      'code-execution-2025-08-25',
+      'files-api-2025-04-14',
+      'web-search-x',
+      'container-x',
+      'advisor-tool-x',
+    ]) {
+      expect(() => filterBetas(`interleaved-thinking-2025-05-14,${b}`), b).toThrow(/not allowed/);
+    }
+    expect(() => filterBetas('bad beta;')).toThrow(/Malformed/);
   });
 });
 

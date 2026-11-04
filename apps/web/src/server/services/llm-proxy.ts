@@ -117,9 +117,17 @@ function toProviderError(err: unknown): ProviderError {
   if (err instanceof ProviderError) return err;
   if (err instanceof Anthropic.APIError) {
     const status = typeof err.status === 'number' ? err.status : 502;
-    const body = err.error as { error?: { type?: string } } | undefined;
+    const body = err.error as { error?: { type?: string; message?: string } } | undefined;
     const type = body?.error?.type ?? err.name;
-    // Provider messages can echo request details; keep only the status and error type.
+    // Provider messages can echo request details, so the caller only gets status and type. The
+    // message goes to server logs (truncated, never the request body) so 4xx causes are
+    // diagnosable from Vercel logs.
+    if (status < 500) {
+      const detail = String(body?.error?.message ?? err.message ?? '').slice(0, 500);
+      console.error(
+        `[llm-proxy] provider ${status} ${type}: ${detail} (request ${err.requestID ?? '-'})`,
+      );
+    }
     return new ProviderError(`Model provider returned HTTP ${status} (${type})`, status, type);
   }
   if (err instanceof Error && err.name === 'AbortError')
@@ -196,21 +204,21 @@ async function recordCall(
 }
 
 /**
- * Betas a sandbox may enable. Anything that turns on server-side tools, provider-side egress
- * (MCP connector), premium speed or model fallback is rejected; other unknown betas are dropped.
+ * Beta policy: deny-list, not allow-list.
+ *
+ * Betas that turn on server-side tools, provider-side egress (MCP connector), premium speed,
+ * model fallback, file/skill storage or hosted agents are rejected. Every other well-formed beta
+ * is forwarded. Claude Code adopts new betas often and pairs them with body fields (e.g.
+ * `thinking.display: "updates"` needs `thinking-display-updates-*`); silently dropping a beta while
+ * the body still uses its field makes the provider reject the whole request with a 400. That's
+ * how background jobs failed with Agent SDK 0.3.318. The body allowlist (proxyBody / customTool)
+ * is what keeps server tools, mcp_servers and `speed` out, so a beta alone can't unlock them.
  */
-export const ALLOWED_BETAS = new Set([
-  'interleaved-thinking-2025-05-14',
-  'context-management-2025-06-27',
-  'fine-grained-tool-streaming-2025-05-14',
-  'token-efficient-tools-2025-02-19',
-  'claude-code-20250219',
-  'compact-2026-01-12',
-]);
 const FORBIDDEN_BETA =
-  /^(mcp-client|fast-mode|code-execution|files-api|skills|web-search|web-fetch|computer-use|oauth|server-side-fallback|message-threads|managed-agents)/;
+  /^(mcp-client|fast-mode|code-execution|files-api|skills|web-search|web-fetch|computer-use|oauth|server-side-fallback|message-threads|managed-agents|container|advisor)/;
+const BETA_SHAPE = /^[a-z0-9][a-z0-9.-]{2,79}$/;
 
-/** Filter an anthropic-beta header value. Throws for betas that must never pass. */
+/** Validate an anthropic-beta header value. Throws for forbidden or malformed betas. */
 export function filterBetas(header: string | null | undefined): string | undefined {
   if (!header) return undefined;
   const kept: string[] = [];
@@ -219,8 +227,10 @@ export function filterBetas(header: string | null | undefined): string | undefin
     if (!b) continue;
     if (FORBIDDEN_BETA.test(b))
       throw new ValidationError(`Beta "${b}" is not allowed through the proxy`);
-    if (ALLOWED_BETAS.has(b)) kept.push(b);
+    if (!BETA_SHAPE.test(b)) throw new ValidationError('Malformed anthropic-beta header');
+    if (!kept.includes(b)) kept.push(b);
   }
+  if (kept.length > 32) throw new ValidationError('Too many betas');
   return kept.length ? kept.join(',') : undefined;
 }
 
