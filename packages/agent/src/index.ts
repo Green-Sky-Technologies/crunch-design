@@ -15,3 +15,4 @@ export * from './prefix';
 export * from './turn-context';
 export * from './interactive';
 export * from './job-prompts';
+export * from './sliders';

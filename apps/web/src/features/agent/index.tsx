@@ -8,6 +8,7 @@ import { agentApi, type JobSuggestion } from './api';
 import { Composer } from './composer';
 import { JobCard, JobSuggestionCard } from './job-card';
 import { MessageItem } from './message-item';
+import { SliderTray } from './slider-tray';
 import { useAgentChat } from './use-agent-chat';
 
 export function AgentPane() {
@@ -90,6 +91,7 @@ export function AgentPane() {
         )}
         <div ref={endRef} />
       </div>
+      <SliderTray />
       {canRun && agentAvailable && (
         <Composer
           projectId={project.id}
