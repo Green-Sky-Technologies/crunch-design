@@ -18,6 +18,7 @@ import {
   type JobStatus,
 } from '@crunch/contracts';
 import {
+  agentConversations,
   agentMessages,
   and,
   asc,
@@ -245,27 +246,68 @@ export async function createJob(db: Db, actor: Actor, raw: unknown): Promise<Job
   if (!input.success)
     throw new ValidationError(`Invalid ${kind} input: ${input.error.issues[0]?.message ?? ''}`);
   if (projectId) await getProject(db, actor, projectId);
-  const [job] = await db
-    .insert(jobs)
-    .values({
-      workspaceId: actor.workspace.id,
-      projectId: projectId ?? null,
-      conversationId: conversationId ?? null,
-      kind,
-      input: input.data,
-      timeoutSeconds: timeoutSeconds ?? DEFAULT_JOB_TIMEOUT_SECONDS,
-      createdBy: actor.userId,
-    })
-    .returning();
-  if (messageId)
-    await db
-      .update(agentMessages)
-      .set({ jobId: job!.id })
-      .where(
-        and(eq(agentMessages.id, messageId), eq(agentMessages.workspaceId, actor.workspace.id)),
-      );
-  await appendJobEvent(db, job!.id, 'status', { status: 'queued' });
-  return job!;
+  if ((conversationId || messageId) && !projectId)
+    throw new ValidationError('A job linked to a conversation needs a projectId');
+
+  const job = await db.transaction(async (tx) => {
+    if (conversationId) {
+      const [conv] = await tx
+        .select({ id: agentConversations.id })
+        .from(agentConversations)
+        .where(
+          and(
+            eq(agentConversations.id, conversationId),
+            eq(agentConversations.workspaceId, actor.workspace.id),
+            eq(agentConversations.projectId, projectId!),
+          ),
+        )
+        .limit(1);
+      if (!conv) throw new ValidationError('Conversation not found in this project');
+    }
+    const [row] = await tx
+      .insert(jobs)
+      .values({
+        workspaceId: actor.workspace.id,
+        projectId: projectId ?? null,
+        conversationId: conversationId ?? null,
+        kind,
+        input: input.data,
+        timeoutSeconds: timeoutSeconds ?? DEFAULT_JOB_TIMEOUT_SECONDS,
+        createdBy: actor.userId,
+      })
+      .returning();
+    if (messageId) {
+      // Only an unlinked assistant message in this project's conversation (and in the given
+      // conversation, if any) can carry the job's edits, snapshot and summary.
+      const linked = await tx
+        .update(agentMessages)
+        .set({ jobId: row!.id })
+        .where(
+          and(
+            eq(agentMessages.id, messageId),
+            eq(agentMessages.workspaceId, actor.workspace.id),
+            eq(agentMessages.role, 'assistant'),
+            isNull(agentMessages.jobId),
+            conversationId ? eq(agentMessages.conversationId, conversationId) : undefined,
+            inArray(
+              agentMessages.conversationId,
+              tx
+                .select({ id: agentConversations.id })
+                .from(agentConversations)
+                .where(eq(agentConversations.projectId, projectId!)),
+            ),
+          ),
+        )
+        .returning({ id: agentMessages.id });
+      if (!linked.length)
+        throw new ValidationError(
+          'messageId must be an assistant message in this project that is not linked to a job',
+        );
+    }
+    return row!;
+  });
+  await appendJobEvent(db, job.id, 'status', { status: 'queued' });
+  return job;
 }
 
 /** Provision a sandbox for a queued job. Safe to call twice (only one caller wins). */
