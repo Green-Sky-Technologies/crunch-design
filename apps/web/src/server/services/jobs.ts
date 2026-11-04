@@ -1,0 +1,496 @@
+/**
+ * Background jobs (Story 5.1): lifecycle, persisted events, SSE with resume, cancel, reaping.
+ *
+ * Lifecycle: queued → provisioning → running → succeeded | failed | cancelled.
+ * Every transition and progress report is a job_events row with a per-job seq (1-based), so a
+ * client that closes the tab can come back and replay from Last-Event-ID. The runner (Vercel
+ * Sandbox) is injected, so tests and local dev use a fake.
+ */
+import { assertCan } from '@crunch/authz';
+import { encodeSse, SSE_KEEPALIVE } from '@crunch/agent';
+import {
+  jobInputs,
+  TERMINAL_STATUSES,
+  type JobEvent,
+  type JobEventType,
+  type JobKind,
+  type JobRunner,
+  type JobStatus,
+} from '@crunch/contracts';
+import {
+  agentMessages,
+  and,
+  asc,
+  eq,
+  gt,
+  inArray,
+  jobEvents,
+  jobs,
+  lt,
+  members,
+  sql,
+  workspaces,
+  type Db,
+  type JobRow,
+} from '@crunch/db';
+import { z } from 'zod';
+import { revokeJobTokens, verifyJobToken, JobTokenError } from './agent/job-tokens';
+import { getProject } from './projects';
+import { NotFoundError, ValidationError, type Actor } from './types';
+
+export const DEFAULT_JOB_TIMEOUT_SECONDS = 30 * 60;
+export const DEFAULT_MAX_ATTEMPTS = 2;
+/** A running job that hasn't reported for this long is presumed orphaned. */
+export const HEARTBEAT_TIMEOUT_MS = 5 * 60 * 1000;
+
+export interface JobDeps {
+  runner: JobRunner;
+  now?: () => Date;
+  maxAttempts?: number;
+  heartbeatTimeoutMs?: number;
+}
+
+const LLM_KINDS = new Set<JobKind>(['codegen', 'figma_export']);
+
+export interface JobView {
+  id: string;
+  kind: JobKind;
+  status: JobStatus;
+  projectId: string | null;
+  conversationId: string | null;
+  input: unknown;
+  result: unknown;
+  error: string | null;
+  attempts: number;
+  lastEventSeq: number;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+export const toJobView = (j: JobRow): JobView => ({
+  id: j.id,
+  kind: j.kind,
+  status: j.status,
+  projectId: j.projectId,
+  conversationId: j.conversationId,
+  input: j.input,
+  result: j.result,
+  error: j.error,
+  attempts: j.attempts,
+  lastEventSeq: j.lastEventSeq,
+  createdAt: j.createdAt.toISOString(),
+  startedAt: j.startedAt?.toISOString() ?? null,
+  finishedAt: j.finishedAt?.toISOString() ?? null,
+});
+
+// ---------------------------------------------------------------------------------------------
+// Events and transitions
+// ---------------------------------------------------------------------------------------------
+
+/** Append an event with the next seq for the job (atomic per job). */
+export async function appendJobEvent(
+  db: Db,
+  jobId: string,
+  type: JobEventType,
+  data: Record<string, unknown> = {},
+): Promise<number> {
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(jobs)
+      .set({ lastEventSeq: sql`${jobs.lastEventSeq} + 1` })
+      .where(eq(jobs.id, jobId))
+      .returning({ seq: jobs.lastEventSeq });
+    if (!row) throw new NotFoundError('Job not found');
+    await tx.insert(jobEvents).values({ jobId, seq: row.seq, type, data });
+    return row.seq;
+  });
+}
+
+/** Conditional status change: only from one of `from`. Returns the updated row, or null. */
+async function transition(
+  db: Db,
+  jobId: string,
+  from: JobStatus[],
+  to: JobStatus,
+  patch: Partial<typeof jobs.$inferInsert> = {},
+  eventData: Record<string, unknown> = {},
+): Promise<JobRow | null> {
+  const [row] = await db
+    .update(jobs)
+    .set({ status: to, ...patch })
+    .where(and(eq(jobs.id, jobId), inArray(jobs.status, from)))
+    .returning();
+  if (!row) return null;
+  await appendJobEvent(db, jobId, 'status', { status: to, ...eventData });
+  if (TERMINAL_STATUSES.has(to)) await onTerminal(db, row);
+  return row;
+}
+
+/** Revoke the job's tokens and settle its chat message. */
+async function onTerminal(db: Db, job: JobRow) {
+  await revokeJobTokens(db, job.id);
+  const status =
+    job.status === 'succeeded' ? 'complete' : job.status === 'cancelled' ? 'cancelled' : 'error';
+  await db
+    .update(agentMessages)
+    .set({ status, error: job.status === 'failed' ? (job.error ?? 'Job failed') : null })
+    .where(
+      and(eq(agentMessages.jobId, job.id), inArray(agentMessages.status, ['pending', 'streaming'])),
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Create / start / cancel
+// ---------------------------------------------------------------------------------------------
+
+export const createJobInput = z
+  .object({
+    kind: z.enum(Object.keys(jobInputs) as [JobKind, ...JobKind[]]),
+    input: z.unknown(),
+    projectId: z.uuid().optional(),
+    conversationId: z.uuid().optional(),
+    /** Assistant message the job reports into (its transactions are attributed to it). */
+    messageId: z.uuid().optional(),
+    timeoutSeconds: z
+      .number()
+      .int()
+      .min(60)
+      .max(24 * 3600)
+      .optional(),
+  })
+  .strict();
+
+export async function createJob(db: Db, actor: Actor, raw: unknown): Promise<JobRow> {
+  assertCan(actor.role, 'agent:run');
+  const parsed = createJobInput.safeParse(raw);
+  if (!parsed.success) throw new ValidationError(parsed.error.issues[0]?.message ?? 'Invalid job');
+  const { kind, projectId, conversationId, messageId, timeoutSeconds } = parsed.data;
+  if (LLM_KINDS.has(kind)) assertCan(actor.role, 'export:llm');
+  const input = jobInputs[kind].safeParse(parsed.data.input);
+  if (!input.success)
+    throw new ValidationError(`Invalid ${kind} input: ${input.error.issues[0]?.message ?? ''}`);
+  if (projectId) await getProject(db, actor, projectId);
+  const [job] = await db
+    .insert(jobs)
+    .values({
+      workspaceId: actor.workspace.id,
+      projectId: projectId ?? null,
+      conversationId: conversationId ?? null,
+      kind,
+      input: input.data,
+      timeoutSeconds: timeoutSeconds ?? DEFAULT_JOB_TIMEOUT_SECONDS,
+      createdBy: actor.userId,
+    })
+    .returning();
+  if (messageId)
+    await db
+      .update(agentMessages)
+      .set({ jobId: job!.id })
+      .where(
+        and(eq(agentMessages.id, messageId), eq(agentMessages.workspaceId, actor.workspace.id)),
+      );
+  await appendJobEvent(db, job!.id, 'status', { status: 'queued' });
+  return job!;
+}
+
+/** Provision a sandbox for a queued job. Safe to call twice (only one caller wins). */
+export async function startJob(db: Db, jobId: string, deps: JobDeps): Promise<JobRow | null> {
+  const now = deps.now?.() ?? new Date();
+  const claimed = await transition(db, jobId, ['queued'], 'provisioning', {
+    attempts: sql`${jobs.attempts} + 1` as unknown as number,
+  });
+  if (!claimed) return null;
+  try {
+    const { sandboxId } = await deps.runner.start({
+      jobId,
+      workspaceId: claimed.workspaceId,
+      kind: claimed.kind,
+      input: claimed.input,
+      timeoutSeconds: claimed.timeoutSeconds,
+    });
+    // A cancel may have landed while provisioning: stop the new sandbox straight away.
+    const running = await transition(db, jobId, ['provisioning'], 'running', {
+      sandboxId,
+      startedAt: now,
+      heartbeatAt: now,
+    });
+    if (!running) await deps.runner.cancel(jobId, sandboxId).catch(() => {});
+    return running;
+  } catch (e) {
+    const message =
+      e instanceof Error ? `${e.name}: ${e.message}`.slice(0, 300) : 'Failed to start';
+    const max = deps.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
+    if (claimed.attempts < max) {
+      await appendJobEvent(db, jobId, 'log', { text: `Start failed, will retry: ${message}` });
+      return transition(db, jobId, ['provisioning'], 'queued');
+    }
+    return transition(db, jobId, ['provisioning'], 'failed', { error: message, finishedAt: now });
+  }
+}
+
+async function loadJob(db: Db, actor: Actor, jobId: string): Promise<JobRow> {
+  if (!z.uuid().safeParse(jobId).success) throw new NotFoundError('Job not found');
+  const [job] = await db
+    .select()
+    .from(jobs)
+    .where(and(eq(jobs.id, jobId), eq(jobs.workspaceId, actor.workspace.id)))
+    .limit(1);
+  if (!job) throw new NotFoundError('Job not found');
+  return job;
+}
+
+export async function getJob(db: Db, actor: Actor, jobId: string): Promise<JobView> {
+  assertCan(actor.role, 'project:read');
+  return toJobView(await loadJob(db, actor, jobId));
+}
+
+export async function cancelJob(
+  db: Db,
+  actor: Actor,
+  jobId: string,
+  deps: JobDeps,
+): Promise<JobView> {
+  assertCan(actor.role, 'agent:run');
+  const job = await loadJob(db, actor, jobId);
+  if (TERMINAL_STATUSES.has(job.status)) return toJobView(job);
+  const now = deps.now?.() ?? new Date();
+  await db.update(jobs).set({ cancelRequestedAt: now }).where(eq(jobs.id, jobId));
+  const row = await transition(
+    db,
+    jobId,
+    ['queued', 'provisioning', 'running'],
+    'cancelled',
+    {
+      finishedAt: now,
+    },
+    { by: actor.userId },
+  );
+  if (job.sandboxId) await deps.runner.cancel(jobId, job.sandboxId).catch(() => {});
+  return toJobView(row ?? (await loadJob(db, actor, jobId)));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Reports from the sandbox (job-token auth)
+// ---------------------------------------------------------------------------------------------
+
+const reportBody = z
+  .object({
+    type: z.enum(['status', 'progress', 'log', 'tool', 'result', 'error']),
+    data: z.record(z.string(), z.unknown()).default({}),
+  })
+  .strict();
+
+export class JobGoneError extends Error {
+  override name = 'JobGoneError';
+}
+
+/** POST /api/jobs/:id/report. Returns the stored event's seq. */
+export async function reportJobEvent(
+  db: Db,
+  token: string | null,
+  jobId: string,
+  raw: unknown,
+  opts: { now?: () => Date } = {},
+): Promise<{ seq: number }> {
+  const job = await verifyJobToken(db, token);
+  if (job.id !== jobId) throw new JobTokenError('Token is for a different job');
+  const parsed = reportBody.safeParse(raw);
+  if (!parsed.success) throw new ValidationError('Invalid report');
+  const now = opts.now?.() ?? new Date();
+  const { type, data } = parsed.data;
+  const json = JSON.stringify(data);
+  const clipped: Record<string, unknown> =
+    json.length <= 20_000 ? data : { truncated: true, preview: json.slice(0, 2000) };
+  await db.update(jobs).set({ heartbeatAt: now }).where(eq(jobs.id, jobId));
+
+  if (type === 'result') {
+    const frames = await db
+      .select({ data: jobEvents.data })
+      .from(jobEvents)
+      .where(and(eq(jobEvents.jobId, jobId), eq(jobEvents.type, 'frame')))
+      .orderBy(asc(jobEvents.seq));
+    const seq = await appendJobEvent(db, jobId, 'result', clipped);
+    const result = { summary: String(clipped.summary ?? ''), frames: frames.map((f) => f.data) };
+    const row = await transition(db, jobId, ['running', 'provisioning'], 'succeeded', {
+      result,
+      finishedAt: now,
+    });
+    if (!row) throw new JobGoneError('Job is no longer running');
+    await db
+      .update(agentMessages)
+      .set({
+        content: {
+          v: 1,
+          turns: [
+            {
+              role: 'assistant',
+              content: [{ type: 'text', text: result.summary || 'Job finished.' }],
+            },
+          ],
+        },
+      })
+      .where(eq(agentMessages.jobId, jobId));
+    return { seq };
+  }
+  if (type === 'error') {
+    const seq = await appendJobEvent(db, jobId, 'error', clipped);
+    await transition(db, jobId, ['running', 'provisioning'], 'failed', {
+      error: String(clipped.message ?? 'Job failed').slice(0, 500),
+      finishedAt: now,
+    });
+    return { seq };
+  }
+  return { seq: await appendJobEvent(db, jobId, type, clipped) };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Reaper (cron): timeouts, orphaned sandboxes, retries, stuck queue
+// ---------------------------------------------------------------------------------------------
+
+export interface ReapSummary {
+  timedOut: string[];
+  orphaned: string[];
+  retried: string[];
+  started: string[];
+}
+
+export async function reapJobs(db: Db, deps: JobDeps): Promise<ReapSummary> {
+  const now = deps.now?.() ?? new Date();
+  const hbTimeout = deps.heartbeatTimeoutMs ?? HEARTBEAT_TIMEOUT_MS;
+  const max = deps.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
+  const out: ReapSummary = { timedOut: [], orphaned: [], retried: [], started: [] };
+
+  const active = await db
+    .select()
+    .from(jobs)
+    .where(inArray(jobs.status, ['provisioning', 'running']))
+    .limit(500);
+  for (const job of active) {
+    const started = job.startedAt ?? job.updatedAt;
+    if (started.getTime() + job.timeoutSeconds * 1000 < now.getTime()) {
+      if (job.sandboxId) await deps.runner.cancel(job.id, job.sandboxId).catch(() => {});
+      await transition(db, job.id, ['provisioning', 'running'], 'failed', {
+        error: `Timed out after ${job.timeoutSeconds}s`,
+        finishedAt: now,
+      });
+      out.timedOut.push(job.id);
+      continue;
+    }
+    const stale = (job.heartbeatAt ?? job.updatedAt).getTime() + hbTimeout < now.getTime();
+    const alive = job.sandboxId ? await deps.runner.isAlive(job.sandboxId) : false;
+    if (!stale && alive) continue;
+    if (alive && job.sandboxId) await deps.runner.cancel(job.id, job.sandboxId).catch(() => {});
+    if (stale || !alive) {
+      if (job.attempts < max) {
+        await revokeJobTokens(db, job.id);
+        await appendJobEvent(db, job.id, 'log', { text: 'Sandbox lost; retrying' });
+        await transition(db, job.id, ['provisioning', 'running'], 'queued', { sandboxId: null });
+        out.retried.push(job.id);
+      } else {
+        await transition(db, job.id, ['provisioning', 'running'], 'failed', {
+          error: 'The job sandbox stopped unexpectedly',
+          finishedAt: now,
+        });
+        out.orphaned.push(job.id);
+      }
+    }
+  }
+
+  const queued = await db
+    .select({ id: jobs.id })
+    .from(jobs)
+    .where(and(eq(jobs.status, 'queued'), lt(jobs.updatedAt, new Date(now.getTime() - 15_000))))
+    .limit(50);
+  for (const { id } of queued) if (await startJob(db, id, deps)) out.started.push(id);
+  return out;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Event stream (SSE with Last-Event-ID resume)
+// ---------------------------------------------------------------------------------------------
+
+export async function listJobEvents(
+  db: Db,
+  actor: Actor,
+  jobId: string,
+  afterSeq = 0,
+  limit = 500,
+): Promise<JobEvent[]> {
+  assertCan(actor.role, 'project:read');
+  await loadJob(db, actor, jobId);
+  const rows = await db
+    .select()
+    .from(jobEvents)
+    .where(and(eq(jobEvents.jobId, jobId), gt(jobEvents.seq, afterSeq)))
+    .orderBy(asc(jobEvents.seq))
+    .limit(limit);
+  return rows.map((r) => ({
+    seq: r.seq,
+    type: r.type as JobEventType,
+    data: r.data as Record<string, unknown>,
+    createdAt: r.createdAt.toISOString(),
+  }));
+}
+
+export function parseLastEventId(header: string | null, query: string | null): number {
+  const n = Number(header ?? query ?? 0);
+  return Number.isInteger(n) && n > 0 ? n : 0;
+}
+
+/**
+ * SSE frames for a job: every event after `afterSeq` (id = seq), polling for new ones until the
+ * job is terminal and drained, then `done`. Ends after maxMs; EventSource resumes from the last id.
+ */
+export async function* jobEventFrames(
+  db: Db,
+  actor: Actor,
+  jobId: string,
+  afterSeq: number,
+  opts: { signal?: AbortSignal; pollMs?: number; maxMs?: number; keepaliveMs?: number } = {},
+): AsyncGenerator<string> {
+  let seq = afterSeq;
+  const deadline = Date.now() + (opts.maxMs ?? 240_000);
+  const keepaliveMs = opts.keepaliveMs ?? 15_000;
+  let lastSent = Date.now();
+  yield encodeSse({ retry: 2000, event: 'open', data: { jobId, after: afterSeq } });
+  while (!opts.signal?.aborted) {
+    const events = await listJobEvents(db, actor, jobId, seq);
+    for (const e of events) {
+      seq = e.seq;
+      lastSent = Date.now();
+      yield encodeSse({ id: e.seq, event: e.type, data: e });
+    }
+    if (!events.length) {
+      const [job] = await db
+        .select({ status: jobs.status, last: jobs.lastEventSeq })
+        .from(jobs)
+        .where(eq(jobs.id, jobId));
+      if (job && TERMINAL_STATUSES.has(job.status) && job.last <= seq) {
+        yield encodeSse({ event: 'done', data: { status: job.status } });
+        return;
+      }
+      if (Date.now() > deadline) return;
+      if (Date.now() - lastSent > keepaliveMs) {
+        lastSent = Date.now();
+        yield SSE_KEEPALIVE;
+      }
+      await new Promise((r) => setTimeout(r, opts.pollMs ?? 1000));
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// The job's acting user (tools run with the creator's current role)
+// ---------------------------------------------------------------------------------------------
+
+export async function jobActor(db: Db, job: JobRow): Promise<Actor> {
+  const [row] = await db
+    .select({ workspace: workspaces, role: members.role })
+    .from(members)
+    .innerJoin(workspaces, eq(workspaces.id, members.workspaceId))
+    .where(and(eq(members.workspaceId, job.workspaceId), eq(members.userId, job.createdBy)))
+    .limit(1);
+  if (!row) throw new JobTokenError('The job owner is no longer a member of this workspace');
+  return { userId: job.createdBy, role: row.role, workspace: row.workspace };
+}
