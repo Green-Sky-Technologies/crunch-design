@@ -85,6 +85,48 @@ describe('VercelSandboxRunner', () => {
   });
 });
 
+describe('assertNoSecrets patterns (defense in depth)', () => {
+  const fake = (prefix: string, n: number, ch = 'A') => prefix + ch.repeat(n);
+  it.each([
+    ['STS key id', { X: fake('ASIA', 16) }],
+    ['AWS key id', { X: fake('AKIA', 16) }],
+    ['AWS secret key shape', { X: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY' }],
+    ['Azure/Foundry key', { X: '0123456789abcdef0123456789abcdef' }],
+    ['Stripe live key', { X: fake('sk_live_', 24, 'x') }],
+    ['GitHub token', { X: fake('ghp_', 36, 'x') }],
+    ['Google API key', { X: fake('AIza', 35, 'x') }],
+    ['forbidden name', { AZURE_OPENAI_KEY: 'x' }],
+    ['forbidden name (Foundry)', { ANTHROPIC_FOUNDRY_API_KEY: 'x' }],
+  ])('rejects %s in env', (_l, env) => {
+    expect(() => assertNoSecrets(env as Record<string, string>)).toThrow(SandboxSecretError);
+  });
+
+  it('rejects distinctive shapes inside files, but not ordinary prompts', () => {
+    expect(() =>
+      assertNoSecrets({}, [{ path: 'job.json', content: `use ${fake('rk_test_', 20, 'y')}` }]),
+    ).toThrow();
+    expect(() =>
+      assertNoSecrets({}, [{ path: 'job.json', content: `token ${fake('ASIA', 16, 'Q')} here` }]),
+    ).toThrow();
+    expect(() =>
+      assertNoSecrets(
+        {
+          ANTHROPIC_AUTH_TOKEN: 'cjt_' + 'a'.repeat(43),
+          CRUNCH_JOB_ID: '11111111-1111-4111-8111-111111111111',
+          ANTHROPIC_MODEL: 'claude-opus-5-5',
+        },
+        [
+          {
+            path: 'job.json',
+            content:
+              'Design a pricing page with three tiers and a 0123456789abcdef0123456789abcdef hash',
+          },
+        ],
+      ),
+    ).not.toThrow();
+  });
+});
+
 describe('sandbox entrypoint', () => {
   async function load() {
     const dir = mkdtempSync(join(tmpdir(), 'crunch-entry-'));

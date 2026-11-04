@@ -73,7 +73,9 @@ export function usageFromMessage(m: Pick<Anthropic.Message, 'usage' | 'stop_reas
 export function estimateCostMicros(model: string, u: UsageTotals): number {
   const m = modelInfo(model);
   if (!m) return 0;
-  const p = m.price;
+  const promptTokens = u.inputTokens + u.cacheReadTokens + u.cacheWriteTokens;
+  const p =
+    m.longContext && promptTokens > m.longContext.aboveTokens ? m.longContext.price : m.price;
   const write1h = Math.min(u.cacheWrite1hTokens, u.cacheWriteTokens);
   const write5m = u.cacheWriteTokens - write1h;
   const micros =

@@ -3,6 +3,7 @@
  *
  * Server-side (imports @crunch/providers). The browser gets the catalog from /api/agent/settings.
  *
+ * Cache reads are 0.1× input except Opus 5.5 (0.05×, $0.20) and Fable 5.1 (0.025×, $0.25).
  * Prices are Anthropic first-party list prices in USD per million tokens, taken from
  * Anthropic's pricing documentation (checked 2026-10-06). Bedrock and Vertex bill at partner
  * rates, so costs on those routes are estimates. Re-check before relying on reconciliation
@@ -26,6 +27,8 @@ export interface ModelInfo {
   label: string;
   tier: ModelTier | 'premium';
   price: ModelPrice;
+  /** Higher rates for long prompts (prompt tokens incl. cache reads/writes above the threshold). */
+  longContext?: { aboveTokens: number; price: ModelPrice };
 }
 
 /** Cache-write multipliers on the input price, by TTL. */
@@ -36,7 +39,9 @@ export const MODELS: readonly ModelInfo[] = [
     id: 'claude-haiku-5-5',
     label: 'Claude Haiku 5.5',
     tier: 'utility',
+    // $0.10/$0.50 up to 100K prompt tokens, $0.50/$2.50 beyond (Anthropic pricing table).
     price: { input: 0.1, output: 0.5, cacheRead: 0.01 },
+    longContext: { aboveTokens: 100_000, price: { input: 0.5, output: 2.5, cacheRead: 0.05 } },
   },
   {
     id: 'claude-sonnet-5-5',

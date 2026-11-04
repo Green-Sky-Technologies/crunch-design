@@ -47,11 +47,35 @@ export function buildSandboxEnv(
 
 /** Names that must never be set inside a sandbox. */
 const FORBIDDEN_KEYS =
-  /^(ANTHROPIC_API_KEY|AWS_[A-Z_]+|GOOGLE_[A-Z_]+|GCLOUD_[A-Z_]+|AZURE_[A-Z_]+|CLAUDE_CODE_USE_(BEDROCK|VERTEX|FOUNDRY)|CREDENTIALS_MASTER_KEYS?|DATABASE_URL|CLERK_SECRET_KEY|BLOB_READ_WRITE_TOKEN|VERCEL_(OIDC_)?TOKEN)$/;
+  /^(ANTHROPIC_API_KEY|OPENAI_API_KEY|AWS_[A-Z_]+|GOOGLE_[A-Z_]+|GCLOUD_[A-Z_]+|AZURE_[A-Z_]+|FOUNDRY_[A-Z_]+|ANTHROPIC_FOUNDRY_[A-Z_]+|CLAUDE_CODE_USE_(BEDROCK|VERTEX|FOUNDRY)|CREDENTIALS_MASTER_KEYS?|CREDENTIALS_ACTIVE_KEY_ID|DATABASE_URL|POSTGRES_[A-Z_]+|CLERK_SECRET_KEY|BLOB_READ_WRITE_TOKEN|CRON_SECRET|STRIPE_[A-Z_]+|VERCEL_(OIDC_)?TOKEN|VERCEL_AUTOMATION_BYPASS_SECRET)$/;
 
-/** Values that look like provider or platform secrets. */
-const SECRET_VALUE =
-  /(sk-ant-[A-Za-z0-9_-]{8,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|"private_key"\s*:)/;
+/**
+ * Distinctive credential shapes, checked in env values and files (prompts and specs included):
+ * Anthropic keys, AWS access key ids (long-term AKIA and STS ASIA), PEM private keys and
+ * service-account JSON, Stripe secret/restricted keys, GitHub and Slack tokens, Google API keys
+ * and OAuth access tokens.
+ */
+const SECRET_VALUE = new RegExp(
+  [
+    'sk-ant-[A-Za-z0-9_-]{8,}',
+    '\\b(?:AKIA|ASIA)[0-9A-Z]{16}\\b',
+    '-----BEGIN [A-Z ]*PRIVATE KEY-----',
+    '"private_key"\\s*:',
+    '\\b[sr]k_(?:live|test)_[0-9A-Za-z]{10,}',
+    '\\bgh[pousr]_[0-9A-Za-z]{30,}',
+    '\\bgithub_pat_[0-9A-Za-z_]{20,}',
+    '\\bxox[abpres]-[0-9A-Za-z-]{10,}',
+    '\\bAIza[0-9A-Za-z_-]{35}',
+    '\\bya29\\.[0-9A-Za-z_-]{20,}',
+  ].join('|'),
+);
+
+/**
+ * Whole-value shapes too generic to search for inside text, but suspicious as an entire env
+ * value: an AWS secret access key (40 base64 chars) or an Azure / Foundry API key (32 hex chars,
+ * or the newer 84-char form).
+ */
+const SECRET_ENV_VALUE = /^(?:[A-Za-z0-9/+]{40}|[0-9a-fA-F]{32}|[A-Za-z0-9]{84})$/;
 
 export class SandboxSecretError extends Error {
   override name = 'SandboxSecretError';
@@ -65,7 +89,8 @@ export function assertNoSecrets(
   for (const [k, v] of Object.entries(env)) {
     if (FORBIDDEN_KEYS.test(k))
       throw new SandboxSecretError(`Refusing to pass ${k} into a sandbox`);
-    if (SECRET_VALUE.test(v)) throw new SandboxSecretError(`Env ${k} looks like a credential`);
+    if (SECRET_VALUE.test(v) || SECRET_ENV_VALUE.test(v))
+      throw new SandboxSecretError(`Env ${k} looks like a credential`);
   }
   for (const f of files)
     if (SECRET_VALUE.test(f.content))
