@@ -19,6 +19,7 @@ import { useCanvasStoreApi } from './canvas-store';
 import { frameIndex } from './context';
 import { hitFromEvent } from './dom';
 import { startNodeDrag } from './drag';
+import { startTextEdit, textTargetFor } from './text-edit';
 import { isTypingEvent } from './gesture';
 
 /** Keyboard navigation over the tree. Returns true if the key was handled. */
@@ -117,18 +118,48 @@ export function useSelectionInput(viewportRef: RefObject<HTMLDivElement | null>)
       // A focused canvas control (layers row, toolbar button) keeps Enter/Space/Tab for itself.
       if (active?.matches('button, select, a[href]') && ['Enter', 'Tab', ' '].includes(e.key))
         return;
+      // Enter on a single selected text node edits it in place.
+      const sel = store.getState().selection.nodeIds;
+      if (e.key === 'Enter' && sel.length === 1) {
+        const doc = store.getState().doc;
+        const frameId = frameIndex(doc).get(sel[0]!);
+        const t = frameId && textTargetFor(doc, ds, frameId, sel[0]!);
+        if (t && startTextEdit({ docStore: store, canvas, viewport: el }, t)) {
+          e.preventDefault();
+          return;
+        }
+      }
       if (handleTreeKey(store, e)) e.preventDefault();
+    };
+    const onDblClick = (e: MouseEvent) => {
+      const hit = hitFromEvent(e);
+      if (!hit || canvas.getState().gesture) return;
+      const doc = store.getState().doc;
+      const id = selectableAt(doc, hit.nodeId);
+      if (!id) return;
+      const t = textTargetFor(
+        doc,
+        ds,
+        hit.frameId,
+        id,
+        id === hit.nodeId ? hit.el.dataset.cdPart : undefined,
+      );
+      if (!t) return;
+      store.getState().select({ frameId: hit.frameId, nodeIds: [id] });
+      if (startTextEdit({ docStore: store, canvas, viewport: el }, t)) e.preventDefault();
     };
     el.addEventListener('pointerdown', onDown);
     el.addEventListener('pointermove', onMove);
     el.addEventListener('pointerleave', onLeave);
     el.addEventListener('click', onClick, true);
+    el.addEventListener('dblclick', onDblClick);
     window.addEventListener('keydown', onKey);
     return () => {
       el.removeEventListener('pointerdown', onDown);
       el.removeEventListener('pointermove', onMove);
       el.removeEventListener('pointerleave', onLeave);
       el.removeEventListener('click', onClick, true);
+      el.removeEventListener('dblclick', onDblClick);
       window.removeEventListener('keydown', onKey);
     };
   }, [viewportRef, store, canvas, ds]);
