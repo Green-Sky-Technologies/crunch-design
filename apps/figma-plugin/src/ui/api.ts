@@ -30,9 +30,17 @@ export interface FrameInfo {
   nodeCount: number;
 }
 
+/**
+ * The plugin token travels in every request, so the API must be https. Plain http is allowed
+ * only for local development (localhost / loopback).
+ */
 export function normalizeBase(base: string): string {
   const b = base.trim().replace(/\/+$/, '');
-  if (!/^https?:\/\/[^\s/]+$/.test(b)) throw new Error('API URL must look like https://host');
+  const m = /^(https?):\/\/([^\s/?#@]+)$/.exec(b);
+  if (!m) throw new Error('API URL must look like https://host');
+  const host = m[2]!.replace(/:\d+$/, '').toLowerCase();
+  const local = host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
+  if (m[1] === 'http' && !local) throw new Error('Use https (http is only allowed for localhost)');
   return b;
 }
 

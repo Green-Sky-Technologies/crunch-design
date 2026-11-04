@@ -25,6 +25,7 @@ import {
   type PluginActor,
 } from '../plugin-tokens';
 import { NotFoundError, ValidationError } from '../types';
+import { BodyTooLargeError, readTextCapped } from './body';
 import { RateLimitedError, RateLimiter } from './rate-limit';
 
 /** Requests per minute per token. */
@@ -101,9 +102,25 @@ export function pluginError(req: Request, err: unknown): Response {
   return json(req, { error: 'internal', message: 'Something went wrong' }, 500);
 }
 
-function clientKey(req: Request): string {
-  const fwd = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
-  return fwd || req.headers.get('x-real-ip') || 'unknown';
+const IP_RE = /^[0-9a-fA-F:.]{2,45}$/;
+
+/**
+ * Client address for rate limiting. Prefer headers the platform sets (Vercel overwrites
+ * x-vercel-forwarded-for / x-real-ip); otherwise use the right-most X-Forwarded-For hop, which
+ * our nearest proxy appended (the left-most entries are client-controlled). Non-IP values are
+ * ignored so clients can't mint arbitrary limiter keys.
+ */
+export function clientKey(req: Request): string {
+  const candidates = [
+    req.headers.get('x-vercel-forwarded-for')?.split(',')[0],
+    req.headers.get('x-real-ip'),
+    req.headers.get('x-forwarded-for')?.split(',').pop(),
+  ];
+  for (const c of candidates) {
+    const v = c?.trim();
+    if (v && IP_RE.test(v)) return v;
+  }
+  return 'unknown';
 }
 
 /** Read and validate a JSON body with a byte cap. */
@@ -112,11 +129,13 @@ export async function pluginBody<T>(
   schema: z.ZodType<T>,
   maxBytes: number,
 ): Promise<T> {
-  const len = Number(req.headers.get('content-length') ?? 0);
-  if (len > maxBytes) throw new ValidationError('Request body too large');
-  const text = await req.text();
-  if (Buffer.byteLength(text, 'utf8') > maxBytes)
-    throw new ValidationError('Request body too large');
+  let text: string;
+  try {
+    text = await readTextCapped(req, maxBytes);
+  } catch (e) {
+    if (e instanceof BodyTooLargeError) throw new ValidationError('Request body too large');
+    throw e;
+  }
   let raw: unknown;
   try {
     raw = JSON.parse(text);

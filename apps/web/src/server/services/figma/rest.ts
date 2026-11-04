@@ -6,6 +6,7 @@
  * fetched only over https from Figma/S3 hosts, with size caps. `fetch` is injectable for tests.
  */
 import { ValidationError } from '../types';
+import { BodyTooLargeError, readTextCapped } from './body';
 
 export type FigmaFetch = (url: string, init?: RequestInit) => Promise<Response>;
 
@@ -54,12 +55,14 @@ export function isAllowedAssetUrl(u: string): boolean {
   }
 }
 
+/** Stream the response and stop at `max` bytes (not UTF-16 characters). */
 async function readCapped(res: Response, max: number): Promise<string> {
-  const len = Number(res.headers.get('content-length') ?? 0);
-  if (len > max) throw new ValidationError('Figma response is too large');
-  const text = await res.text();
-  if (text.length > max) throw new ValidationError('Figma response is too large');
-  return text;
+  try {
+    return await readTextCapped(res, max);
+  } catch (e) {
+    if (e instanceof BodyTooLargeError) throw new ValidationError('Figma response is too large');
+    throw e;
+  }
 }
 
 export class FigmaRest {
