@@ -26,7 +26,10 @@ import {
   type Project,
 } from '@crunch/db';
 import { designSystemSpec, starterDesignSystem, type DesignSystemSpec } from '@crunch/doc-model';
+import { z } from 'zod';
+import { getDoc } from './design-docs';
 import { draftSpecOf } from './design-systems';
+import { diffSystemsForDoc, type SystemDiff } from './design-systems/diff';
 import { getProject } from './projects';
 import { NotFoundError, ValidationError, type Actor } from './types';
 
@@ -228,6 +231,102 @@ export async function pinProjectDesignSystemVersion(
   const [updated] = await db
     .update(projects)
     .set({ designSystemVersionId: v.id })
+    .where(and(eq(projects.id, project.id), eq(projects.workspaceId, actor.workspace.id)))
+    .returning();
+  return resolveProjectDesignSystem(db, actor, updated!);
+}
+
+// ---------------------------------------------------------------------------------------------
+// switching systems (Story 4.3)
+// ---------------------------------------------------------------------------------------------
+
+export interface SwitchTarget {
+  designSystemId: string;
+  /** A published version; default = the latest published (or the draft if never published). */
+  version?: number;
+}
+
+interface ResolvedTarget {
+  id: string;
+  name: string;
+  version: number | null;
+  versionId: string | null;
+  spec: DesignSystemSpec;
+}
+
+async function resolveTarget(db: Db, actor: Actor, target: SwitchTarget): Promise<ResolvedTarget> {
+  if (!z.uuid().safeParse(target.designSystemId).success)
+    throw new NotFoundError('Design system not found');
+  const [ds] = await db
+    .select()
+    .from(designSystems)
+    .where(
+      and(
+        eq(designSystems.id, target.designSystemId),
+        eq(designSystems.workspaceId, actor.workspace.id),
+        isNull(designSystems.archivedAt),
+      ),
+    )
+    .limit(1);
+  if (!ds) throw new NotFoundError('Design system not found');
+  const version = target.version ?? ds.latestVersion;
+  if (version === null)
+    return { id: ds.id, name: ds.name, version: null, versionId: null, spec: draftSpecOf(ds) };
+  const v = Number.isInteger(version) ? await versionRow(db, ds.id, { version }) : undefined;
+  if (!v) throw new NotFoundError('Version not found');
+  return {
+    id: ds.id,
+    name: ds.name,
+    version: v.version,
+    versionId: v.id,
+    spec: designSystemSpec.parse(v.spec),
+  };
+}
+
+export interface SwitchPreview {
+  current: { id: string; name: string; version: number | null };
+  target: { id: string; name: string; version: number | null };
+  diff: SystemDiff;
+}
+
+/** What would change in this project's design if it used `target` (nothing is written). */
+export async function previewProjectDesignSystemSwitch(
+  db: Db,
+  actor: Actor,
+  projectId: string,
+  target: SwitchTarget,
+): Promise<SwitchPreview> {
+  assertCan(actor.role, 'design_system:read');
+  const project = await getProject(db, actor, projectId);
+  const [current, next, state] = await Promise.all([
+    resolveProjectDesignSystem(db, actor, project),
+    resolveTarget(db, actor, target),
+    getDoc(db, actor, project.id),
+  ]);
+  return {
+    current: { id: current.id, name: current.name, version: current.version },
+    target: { id: next.id, name: next.name, version: next.version },
+    diff: diffSystemsForDoc(state.doc, current.spec, next.spec),
+  };
+}
+
+/**
+ * Move a project to another design system (or another version of its own). It pins the target's
+ * published version; a never-published target leaves the project on that system's draft.
+ */
+export async function switchProjectDesignSystem(
+  db: Db,
+  actor: Actor,
+  projectId: string,
+  target: SwitchTarget,
+): Promise<ResolvedDesignSystem> {
+  assertCan(actor.role, 'project:update');
+  assertCan(actor.role, 'design_system:read');
+  const project = await getProject(db, actor, projectId);
+  const next = await resolveTarget(db, actor, target);
+  const [updated] = await db
+    .update(projects)
+    .set({ designSystemId: next.id, designSystemVersionId: next.versionId })
     .where(and(eq(projects.id, project.id), eq(projects.workspaceId, actor.workspace.id)))
     .returning();
   return resolveProjectDesignSystem(db, actor, updated!);

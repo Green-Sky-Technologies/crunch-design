@@ -8,12 +8,14 @@ import { db, requireActor } from '@/server/context';
 import { listDesignSystems } from '@/server/services/design-systems';
 import { listProjectDesignSystems } from '@/server/services/project-design-system';
 import { ProjectsTable } from './projects-table';
+import { NewDesignSystemForm, SystemCardActions } from './system-actions';
 
 export { DesignSystemEditor } from './editor/design-system-editor';
 export { DesignSystemUpgradeNotice, type UpgradeNoticeProps } from './upgrade-notice';
 
 export async function DesignSystemsPage({
   workspaceSlug,
+  canEdit,
 }: {
   workspaceSlug: string;
   canEdit: boolean;
@@ -24,19 +26,23 @@ export async function DesignSystemsPage({
     listProjectDesignSystems(db(), actor),
   ]);
   const base = `/w/${workspaceSlug}/design-systems`;
+  const options = systems.map((s) => ({ id: s.id, name: s.name, latestVersion: s.latestVersion }));
 
   return (
     <main className="mx-auto w-full max-w-5xl px-6 py-8">
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold tracking-tight">Design systems</h1>
-        <p className="mt-1 text-sm text-muted">
-          Tokens, components and guidelines. Projects render with a published version.
-        </p>
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Design systems</h1>
+          <p className="mt-1 text-sm text-muted">
+            Tokens, components and guidelines. Projects render with a published version.
+          </p>
+        </div>
+        {canEdit && <NewDesignSystemForm workspaceSlug={workspaceSlug} systems={options} />}
       </div>
       <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {systems.map((s) => (
-          <li key={s.id}>
-            <Link href={`${base}/${s.id}`} className="card block p-4 hover:bg-surface-2">
+          <li key={s.id} className="card">
+            <Link href={`${base}/${s.id}`} className="block rounded-t-lg p-4 hover:bg-surface-2">
               <div className="flex items-center justify-between gap-3">
                 <p className="font-medium">{s.name}</p>
                 {s.isDefault && (
@@ -52,6 +58,9 @@ export async function DesignSystemsPage({
                 {` · ${s.projectCount} project${s.projectCount === 1 ? '' : 's'}`}
               </p>
             </Link>
+            {canEdit && (
+              <SystemCardActions id={s.id} isDefault={s.isDefault} projectCount={s.projectCount} />
+            )}
           </li>
         ))}
       </ul>
@@ -59,12 +68,13 @@ export async function DesignSystemsPage({
       <section className="mt-10">
         <h2 className="mb-1 text-lg font-semibold tracking-tight">Projects</h2>
         <p className="mb-3 text-sm text-muted">
-          Each project pins a published version. Editing a draft never changes them; upgrade when
-          you&apos;re ready.
+          Each project pins a published version. Editing a draft never changes them; upgrade or
+          switch systems when you&apos;re ready, after previewing what changes.
         </p>
         <ProjectsTable
           workspaceSlug={workspaceSlug}
           projects={projects}
+          systems={options}
           canUpdate={can(actor.role, 'project:update')}
         />
       </section>

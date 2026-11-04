@@ -1,10 +1,17 @@
 'use client';
 
 import { useState, useTransition } from 'react';
-import { upgradeProjectDesignSystemAction } from '@/server/actions/design-systems';
+import {
+  previewDesignSystemSwitchAction,
+  upgradeProjectDesignSystemAction,
+} from '@/server/actions/design-systems';
+import type { SystemDiff } from '@/server/services/design-systems/diff';
+import { DiffView } from './diff-view';
 
 export interface UpgradeNoticeProps {
   projectId: string;
+  /** Enables "What changes?" (a diff of the pinned vs. latest version for this project). */
+  designSystemId?: string;
   designSystemName: string;
   /** Version the project is pinned to. */
   version: number | null;
@@ -24,6 +31,7 @@ export interface UpgradeNoticeProps {
  */
 export function DesignSystemUpgradeNotice({
   projectId,
+  designSystemId,
   designSystemName,
   version,
   latestVersion,
@@ -35,6 +43,7 @@ export function DesignSystemUpgradeNotice({
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  const [diff, setDiff] = useState<SystemDiff | null>(null);
   if (!upgradeAvailable || done) return null;
 
   const upgrade = () =>
@@ -45,27 +54,51 @@ export function DesignSystemUpgradeNotice({
       onUpgraded?.(res.data.version);
     });
 
+  const review = () =>
+    start(async () => {
+      if (diff) return setDiff(null);
+      const res = await previewDesignSystemSwitchAction(projectId, {
+        designSystemId: designSystemId!,
+      });
+      if (!res.ok) return setError(res.error);
+      setDiff(res.data.diff);
+    });
+
   return (
-    <div
-      role="status"
-      className={`flex flex-wrap items-center gap-2 text-sm ${compact ? '' : 'card border-accent/40 px-3 py-2'}`}
-    >
-      <span>
-        {compact ? '' : `${designSystemName} `}
-        <strong>v{latestVersion}</strong> is available
-        {version !== null ? ` (this project uses v${version})` : ''}.
-      </span>
-      {canUpgrade && (
-        <button
-          type="button"
-          className="btn-ghost py-1 text-xs"
-          disabled={pending}
-          onClick={upgrade}
-        >
-          {pending ? 'Upgrading…' : `Upgrade to v${latestVersion}`}
-        </button>
+    <div role="status" className={`text-sm ${compact ? '' : 'card border-accent/40 px-3 py-2'}`}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span>
+          {compact ? '' : `${designSystemName} `}
+          <strong>v{latestVersion}</strong> is available
+          {version !== null ? ` (this project uses v${version})` : ''}.
+        </span>
+        {designSystemId && (
+          <button
+            type="button"
+            className="btn-ghost py-1 text-xs"
+            disabled={pending}
+            onClick={review}
+          >
+            {diff ? 'Hide changes' : 'What changes?'}
+          </button>
+        )}
+        {canUpgrade && (
+          <button
+            type="button"
+            className="btn-ghost py-1 text-xs"
+            disabled={pending}
+            onClick={upgrade}
+          >
+            {pending ? 'Working…' : `Upgrade to v${latestVersion}`}
+          </button>
+        )}
+        {error && <span className="text-xs text-danger">{error}</span>}
+      </div>
+      {diff && (
+        <div className="mt-2 rounded-md bg-surface-2 p-3 text-left">
+          <DiffView diff={diff} />
+        </div>
       )}
-      {error && <span className="text-xs text-danger">{error}</span>}
     </div>
   );
 }

@@ -18,7 +18,13 @@ import {
   updateDesignSystemDetails,
   type NewSystemSource,
 } from '../services/design-systems';
-import { pinProjectDesignSystemVersion } from '../services/project-design-system';
+import {
+  pinProjectDesignSystemVersion,
+  previewProjectDesignSystemSwitch,
+  switchProjectDesignSystem,
+  type SwitchPreview,
+  type SwitchTarget,
+} from '../services/project-design-system';
 import { run, type ActionResult } from './result';
 
 const base = (slug: string) => `/w/${slug}/design-systems`;
@@ -118,6 +124,28 @@ export async function upgradeProjectDesignSystemAction(
   const res = await run(async () => ({
     version: (await pinProjectDesignSystemVersion(db(), actor, projectId, version)).version,
   }));
+  revalidatePath(`/w/${actor.workspace.slug}`, 'layout');
+  return res;
+}
+
+/** Preview what a project's design would look like on another system/version (read-only). */
+export async function previewDesignSystemSwitchAction(
+  projectId: string,
+  target: SwitchTarget,
+): Promise<ActionResult<SwitchPreview>> {
+  const actor = await requireActor();
+  return run(() => previewProjectDesignSystemSwitch(db(), actor, projectId, target));
+}
+
+export async function switchProjectDesignSystemAction(
+  projectId: string,
+  target: SwitchTarget,
+): Promise<ActionResult<{ designSystemId: string; version: number | null }>> {
+  const actor = await requireActor();
+  const res = await run(async () => {
+    const r = await switchProjectDesignSystem(db(), actor, projectId, target);
+    return { designSystemId: r.id, version: r.version };
+  });
   revalidatePath(`/w/${actor.workspace.slug}`, 'layout');
   return res;
 }
