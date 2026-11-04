@@ -1,5 +1,9 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "lib": ["ES2017"], "types": ["@figma/plugin-typings"], "target": "ES2017" },
-  "include": ["src"]
+  "compilerOptions": {
+    "lib": ["ES2020"],
+    "types": ["@figma/plugin-typings"],
+    "target": "ES2017"
+  },
+  "include": ["src/code.ts", "src/main", "src/shared"]
 }

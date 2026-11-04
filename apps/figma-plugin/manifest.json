@@ -6,9 +6,10 @@
   "ui": "dist/ui.html",
   "editorType": ["figma"],
   "documentAccess": "dynamic-page",
+  "enablePrivatePluginApi": true,
   "networkAccess": {
     "allowedDomains": ["http://localhost:3000"],
-    "devAllowedDomains": ["http://localhost:3000"],
-    "reasoning": "Talks to the CrunchDesign API to push and import designs."
+    "devAllowedDomains": ["http://localhost:3000", "http://localhost:3015"],
+    "reasoning": "Talks to the CrunchDesign API to push and import designs and sync variables. Add the production CrunchDesign origin here before publishing."
   }
 }

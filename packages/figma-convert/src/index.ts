@@ -1,5 +1,19 @@
 /**
- * @crunch/figma-convert: DesignDoc <-> Figma node conversion (Stories 8.2, 8.3).
- * Skeleton created by foundation; owned by stream-figma (see docs/worktree-plan.md).
+ * @crunch/figma-convert: DesignDoc <-> Figma conversion (Stories 8.2-8.4). Pure functions only;
+ * network and Figma API access live in apps/web and apps/figma-plugin.
  */
-export {};
+export * from './plan';
+export * from './color';
+export * from './units';
+export * from './css-values';
+export * from './report';
+export * from './reconcile';
+export * from './variables';
+export * from './to-figma';
+export * from './figma-node';
+export * from './from-figma';
+export * from './serialize';
+export * from './sync-types';
+export * from './token-sync';
+export * from './modes';
+export * from './variable-values';

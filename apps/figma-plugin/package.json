@@ -5,9 +5,12 @@
   "scripts": {
     "build": "node build.mjs",
     "dev": "node build.mjs --watch",
-    "typecheck": "tsc -p .",
+    "typecheck": "tsc -p . && tsc -p tsconfig.ui.json",
     "lint": "eslint src",
     "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@crunch/figma-convert": "workspace:*"
   },
   "devDependencies": {
     "@figma/plugin-typings": "^1.142.0",
