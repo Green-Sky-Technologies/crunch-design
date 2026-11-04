@@ -3,12 +3,14 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./sliders": "./src/sliders.ts"
   },
   "scripts": {
     "typecheck": "tsc -p .",
     "test": "vitest run --passWithNoTests",
-    "lint": "eslint src"
+    "lint": "eslint src",
+    "eval": "tsx src/evals/cli.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.4.0",
