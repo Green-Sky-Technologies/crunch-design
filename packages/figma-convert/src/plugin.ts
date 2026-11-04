@@ -6,4 +6,6 @@ export * from './plan';
 export * from './reconcile';
 export * from './serialize';
 export * from './sync-types';
+export * from './modes';
+export * from './variable-values';
 export type { FigmaNode, FigmaPaint } from './figma-node';

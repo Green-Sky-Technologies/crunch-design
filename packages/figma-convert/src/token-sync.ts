@@ -32,6 +32,7 @@ import type {
   TokenDiffEntry,
   VariablesSnapshot,
 } from './sync-types';
+import { themeName } from './modes';
 import { toPx } from './units';
 import {
   primaryFamily,
@@ -83,15 +84,6 @@ export const variablesSnapshot = z.object({
     )
     .max(50),
 }) satisfies z.ZodType<VariablesSnapshot>;
-
-export const themeName = (mode: string): string | null => {
-  const s = mode
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  return /^[a-z][a-z0-9-]*$/.test(s) ? s : null;
-};
 
 // ------------------------------------------------------------------ normalization
 
@@ -153,11 +145,17 @@ function literal(type: TokenType, v: SnapshotValue): TokenValue | null {
 export function snapshotToTokenSet(
   snap: VariablesSnapshot,
   opts: { existing?: DesignSystemSpec; collectionName?: string } = {},
-): { set: TokenSet; report: ReturnType<Reporter['list']>; collection: SnapshotCollection | null } {
+): {
+  set: TokenSet;
+  report: ReturnType<Reporter['list']>;
+  collection: SnapshotCollection | null;
+  /** Theme names of every non-default mode (including modes with no overrides). */
+  themes: string[];
+} {
   const report = new Reporter();
   const set: TokenSet = { tokens: {}, themes: {} };
   const col = pickCollection(snap, opts.collectionName);
-  if (!col) return { set, report: report.list(), collection: null };
+  if (!col) return { set, report: report.list(), collection: null, themes: [] };
   const pathById = new Map<string, string>();
   for (const v of col.variables) {
     const p =
@@ -216,7 +214,8 @@ export function snapshotToTokenSet(
       report.warn('Alias target not synced; skipped', { subject: p });
     }
   }
-  return { set, report: report.list(), collection: col };
+  const themes = [...new Set([...modeTheme.values()].filter((t): t is string => !!t))];
+  return { set, report: report.list(), collection: col, themes };
 }
 
 // ------------------------------------------------------------------ comparison
@@ -445,10 +444,13 @@ export function buildPullPatch(
   if (diff.direction !== 'pull') throw new Error('Not a pull diff');
   const patch: TokenPatch = { tokens: {}, themes: {} };
   for (const { entry, value } of decisions(diff, sel)) {
-    if (entry.theme)
+    if (entry.theme) {
+      // Figma has no override for this mode (its value equals the base): delete ours rather
+      // than writing an explicit override that merely repeats the base value.
+      const explicit = theirs.themes[entry.theme]?.[entry.path] !== undefined;
       (patch.themes[entry.theme] ??= {})[entry.path] =
-        value === undefined ? null : (value as TokenValue);
-    else if (value === undefined) patch.tokens[entry.path] = null;
+        value === undefined || !explicit ? null : (value as TokenValue);
+    } else if (value === undefined) patch.tokens[entry.path] = null;
     else
       patch.tokens[entry.path] = {
         type: theirs.tokens[entry.path]?.type ?? (entry.type as TokenType),
@@ -518,17 +520,24 @@ export function buildPushVariables(
   ours: TokenSet,
   theirs: TokenSet,
   sel: Selection,
-  opts: { collectionName?: string } = {},
+  opts: {
+    collectionName?: string;
+    /** Theme names of every existing Figma mode, so modes without overrides still get values. */
+    themes?: string[];
+  } = {},
 ): { variables: VariablesSpec; remove: string[]; result: TokenSet } {
   if (diff.direction !== 'push') throw new Error('Not a push diff');
   const result: TokenSet = structuredClone(theirs);
+  for (const t of opts.themes ?? []) result.themes[t] ??= {};
   const touched = new Set<string>();
   const remove: string[] = [];
   for (const { entry, value } of decisions(diff, sel)) {
     touched.add(entry.path);
     if (entry.theme) {
       const t = (result.themes[entry.theme] ??= {});
-      if (value === undefined) delete t[entry.path];
+      // No explicit override on our side: the mode follows the base value.
+      if (value === undefined || ours.themes[entry.theme]?.[entry.path] === undefined)
+        delete t[entry.path];
       else t[entry.path] = value as TokenValue;
     } else if (value === undefined) {
       delete result.tokens[entry.path];

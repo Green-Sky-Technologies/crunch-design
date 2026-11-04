@@ -1,5 +1,5 @@
 /** Upsert Figma variables from a plan (push, Story 8.2; token sync, Story 8.4). */
-import { PLUGIN_TOKEN_KEY, type VariablesSpec } from '@crunch/figma-convert/plugin';
+import { modeKey, PLUGIN_TOKEN_KEY, type VariablesSpec } from '@crunch/figma-convert/plugin';
 import type { Note } from './note';
 
 export const COLLECTION_KEY = 'cd:collection';
@@ -7,7 +7,7 @@ export const COLLECTION_KEY = 'cd:collection';
 export interface UpsertResult {
   byPath: Map<string, Variable>;
   collectionId: string;
-  /** Mode name -> Figma mode id. */
+  /** Normalized mode name -> Figma mode id. */
   modes: Record<string, string>;
   created: number;
   updated: number;
@@ -34,14 +34,16 @@ export async function upsertVariables(
   }
   col.setPluginData(COLLECTION_KEY, '1');
 
-  const modes: Record<string, string> = {};
-  for (const m of col.modes) modes[m.name.toLowerCase()] = m.modeId;
-  const modeId = (name: string) => modes[name.toLowerCase()];
-  if (!modeId(spec.modes[0]!)) modes[spec.modes[0]!.toLowerCase()] = col.defaultModeId;
+  // The first spec mode is always the collection's default mode (base tokens). Other modes are
+  // matched with the same normalization the server uses for theme names ("Dark Mode" = dark-mode).
+  const modes: Record<string, string> = { [modeKey(spec.modes[0]!)]: col.defaultModeId };
+  for (const m of col.modes)
+    if (m.modeId !== col.defaultModeId) modes[modeKey(m.name)] ??= m.modeId;
+  const modeId = (name: string) => modes[modeKey(name)];
   for (const name of spec.modes.slice(1)) {
     if (modeId(name)) continue;
     try {
-      modes[name.toLowerCase()] = col.addMode(name);
+      modes[modeKey(name)] = col.addMode(name);
     } catch {
       note(
         'warning',
@@ -50,6 +52,8 @@ export async function upsertVariables(
       );
     }
   }
+  const covered = new Set(spec.modes.map((m) => modeId(m)).filter((x): x is string => !!x));
+  const allModeIds = col.modes.map((m) => m.modeId);
 
   const existing = (await figma.variables.getLocalVariablesAsync()).filter(
     (v) => v.variableCollectionId === col.id,
@@ -85,31 +89,41 @@ export async function upsertVariables(
     byPath.set(vs.path, v);
   }
 
+  const toFigma = (
+    value: VariablesSpec['variables'][number]['valuesByMode'][string],
+    path: string,
+  ) => {
+    if (typeof value === 'object' && 'alias' in value) {
+      const target = byPath.get(value.alias);
+      if (!target) {
+        note('warning', `Alias target "${value.alias}" missing; value skipped`, path);
+        return null;
+      }
+      return figma.variables.createVariableAlias(target);
+    }
+    return value as VariableValue;
+  };
+
   // Values second, so aliases can point at variables created in this pass.
   for (const vs of spec.variables) {
     const v = byPath.get(vs.path);
     if (!v || v.resolvedType !== vs.type) continue;
-    for (const [mode, value] of Object.entries(vs.valuesByMode)) {
-      const id = modeId(mode);
-      if (!id) continue;
-      try {
-        if (typeof value === 'object' && 'alias' in value) {
-          const target = byPath.get(value.alias);
-          if (!target) {
-            note('warning', `Alias target "${value.alias}" missing; value skipped`, vs.path);
-            continue;
-          }
-          v.setValueForMode(id, figma.variables.createVariableAlias(target));
-        } else {
-          v.setValueForMode(id, value as VariableValue);
-        }
-      } catch (e) {
-        note(
-          'error',
-          `Couldn't set ${mode} value: ${e instanceof Error ? e.message : String(e)}`,
-          vs.path,
-        );
+    try {
+      for (const [mode, value] of Object.entries(vs.valuesByMode)) {
+        const id = modeId(mode);
+        if (!id) continue;
+        const val = toFigma(value, vs.path);
+        if (val !== null) v.setValueForMode(id, val);
       }
+      // Modes the plan doesn't mention (e.g. a Figma-only mode) follow the base value.
+      const baseValue = vs.valuesByMode[spec.modes[0]!];
+      if (baseValue !== undefined) {
+        const val = toFigma(baseValue, vs.path);
+        if (val !== null)
+          for (const id of allModeIds) if (!covered.has(id)) v.setValueForMode(id, val);
+      }
+    } catch (e) {
+      note('error', `Couldn't set values: ${e instanceof Error ? e.message : String(e)}`, vs.path);
     }
   }
 

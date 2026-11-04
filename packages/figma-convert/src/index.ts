@@ -15,3 +15,5 @@ export * from './from-figma';
 export * from './serialize';
 export * from './sync-types';
 export * from './token-sync';
+export * from './modes';
+export * from './variable-values';

@@ -95,12 +95,13 @@ function compute(
     set: theirs,
     report,
     collection,
+    themes,
   } = snapshotToTokenSet(input.snapshot, {
     existing: spec,
     collectionName: DEFAULT_COLLECTION,
   });
   const diff = diffTokenSets(ours, theirs, base, direction);
-  return { ours, theirs, report, collection, diff };
+  return { ours, theirs, report, collection, themes, diff };
 }
 
 function domain<T>(fn: () => T): T {
@@ -218,7 +219,12 @@ export async function planVariablesPush(
 ): Promise<{ variables: VariablesSpec; remove: string[] }> {
   assertCan(actor.role, 'design_system:edit');
   const { spec, mapping } = await context(db, actor, projectId, input.fileKey);
-  const { diff, ours, theirs, collection } = compute(spec, input, mapping.base ?? null, 'push');
+  const { diff, ours, theirs, collection, themes } = compute(
+    spec,
+    input,
+    mapping.base ?? null,
+    'push',
+  );
   const { variables, remove } = domain(() =>
     buildPushVariables(
       diff,
@@ -227,6 +233,7 @@ export async function planVariablesPush(
       { selected: input.selected, resolutions: input.resolutions },
       {
         collectionName: collection?.name ?? DEFAULT_COLLECTION,
+        themes,
       },
     ),
   );

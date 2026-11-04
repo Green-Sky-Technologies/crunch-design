@@ -15,6 +15,7 @@ import {
   type TokenSet,
 } from './token-sync';
 import { tokensToVariables } from './variables';
+import { modeKey, themeName } from './modes';
 
 const ds = starterDesignSystem();
 
@@ -235,5 +236,82 @@ describe('token sync', () => {
     });
     expect(set.themes).toEqual({ 'dark-mode': { 'brand.main': '#ffffff' } });
     expect(report.some((r) => r.subject === 'flag/beta')).toBe(true);
+  });
+});
+
+describe('mode names and mode values', () => {
+  it('normalizes mode names the same way on both sides', () => {
+    expect(themeName('Dark Mode')).toBe('dark-mode');
+    expect(themeName('  High Contrast! ')).toBe('high-contrast');
+    expect(themeName('Dark -- Mode')).toBe('dark-mode');
+    expect(themeName('2024')).toBeNull();
+    expect(modeKey('Dark Mode')).toBe(modeKey('dark-mode'));
+    expect(modeKey('High Contrast!')).toBe(modeKey('high-contrast'));
+    expect(modeKey('2024')).toBe('2024');
+  });
+
+  it('round-trips themes whose Figma mode names have spaces and punctuation', () => {
+    const spec = starterDesignSystem();
+    spec.themes = {
+      'dark-mode': { 'color.background': '#000000' },
+      'high-contrast': { 'color.text': '#000000' },
+    };
+    const vs = tokensToVariables(spec);
+    expect(vs.modes).toEqual(['light', 'dark-mode', 'high-contrast']);
+    // Figma shows the modes with human names.
+    const snap = snapshotFrom(vs);
+    snap.collections[0]!.modes = [
+      { modeId: '1:0', name: 'Light' },
+      { modeId: '1:1', name: 'Dark Mode' },
+      { modeId: '1:2', name: 'High Contrast!' },
+    ];
+    const { set, themes } = snapshotToTokenSet(snap, { existing: spec });
+    expect(themes).toEqual(['dark-mode', 'high-contrast']);
+    expect(diffTokenSets(dsToTokenSet(spec), set, null, 'pull').entries).toEqual([]);
+  });
+
+  it('push writes base values into Figma modes that have no overrides', () => {
+    const spec = starterDesignSystem();
+    spec.themes = {}; // no dark theme in CrunchDesign
+    const vs = tokensToVariables(starterDesignSystem());
+    const snap = snapshotFrom(vs, 'Light');
+    // Figma's Dark mode equals the base everywhere (no overrides).
+    for (const v of snap.collections[0]!.variables) v.valuesByMode['1:1'] = v.valuesByMode['1:0']!;
+    const { set: theirs, themes } = snapshotToTokenSet(snap, { existing: spec });
+    expect(theirs.themes).toEqual({});
+    expect(themes).toEqual(['dark']);
+    const ours = dsToTokenSet(spec);
+    ours.tokens['color.primary'] = { type: 'color', value: '#ff0000' };
+    const base = structuredClone(theirs);
+    const diff = diffTokenSets(ours, theirs, base, 'push');
+    const { variables } = buildPushVariables(
+      diff,
+      ours,
+      theirs,
+      { selected: ['base:color.primary'] },
+      { themes },
+    );
+    expect(variables.modes).toEqual(['light', 'dark']);
+    const primary = variables.variables.find((v) => v.path === 'color.primary')!;
+    expect(primary.valuesByMode).toEqual({
+      light: { r: 1, g: 0, b: 0, a: 1 },
+      dark: { r: 1, g: 0, b: 0, a: 1 },
+    });
+  });
+
+  it('pull deletes a theme override that Figma removed instead of re-adding it as base', () => {
+    const spec = starterDesignSystem(); // dark overrides color.background
+    const snap = snapshotFrom(tokensToVariables(spec));
+    const bg = snap.collections[0]!.variables.find((v) => v.name === 'color/background')!;
+    bg.valuesByMode['1:1'] = bg.valuesByMode['1:0']!; // Figma dropped the dark override
+    const ours = dsToTokenSet(spec);
+    const theirs = snapshotToTokenSet(snap, { existing: spec }).set;
+    const diff = diffTokenSets(ours, theirs, ours, 'pull');
+    expect(diff.entries.map((e) => [e.key, e.status])).toEqual([
+      ['dark:color.background', 'changed'],
+    ]);
+    const patch = buildPullPatch(diff, theirs, { selected: ['dark:color.background'] });
+    expect(patch.themes).toEqual({ dark: { 'color.background': null } });
+    expect(applyTokenPatch(spec, patch).themes.dark?.['color.background']).toBeUndefined();
   });
 });
