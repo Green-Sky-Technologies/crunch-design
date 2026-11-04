@@ -55,6 +55,7 @@ const view = (over: Partial<MessageView>): MessageView => ({
 
 let fetchMock: ReturnType<typeof vi.fn>;
 let initialMessages: MessageView[] = [];
+let snapshotDoc: unknown = null;
 
 beforeEach(() => {
   FakeEventSource.all = [];
@@ -104,6 +105,7 @@ beforeEach(() => {
         allowedModels: null,
         canManage: false,
       });
+    if (url.endsWith('/snapshot')) return body({ snapshotId: 's1', doc: snapshotDoc });
     if (url === '/api/agent/jobs')
       return body({
         job: { id: 'j1', status: 'queued' },
@@ -223,6 +225,21 @@ describe('AgentPane', () => {
     );
     expect(screen.getByText('Pricing')).toBeTruthy();
     expect(screen.getByTestId('job-card').dataset.status).toBe('running');
+  });
+
+  it('reverts an agent change through the doc store, undoably', async () => {
+    const before = sampleLandingDoc();
+    snapshotDoc = { ...before, frames: [], nodes: {} };
+    vi.stubGlobal('confirm', () => true);
+    initialMessages = [
+      view({ id: 'u1', role: 'user', seq: 1, text: 'x' }),
+      view({ id: 'a1', seq: 2, text: 'Done', txnIds: ['t1'], snapshotVersionId: 's1' }),
+    ];
+    renderPane();
+    fireEvent.click(await screen.findByText('Revert agent change'));
+    expect(await screen.findByText(/Reverted\./)).toBeTruthy();
+    fireEvent.click(screen.getByText('Undo'));
+    expect(await screen.findByText('Revert agent change')).toBeTruthy();
   });
 
   it('viewers get no composer', async () => {

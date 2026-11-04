@@ -109,6 +109,8 @@ describe('generation jobs', () => {
     const msg = chat.messages.find((m) => m.jobId === job.id)!;
     expect(msg.status).toBe('complete');
     expect(msg.text).toContain('Created 2 frames: Desktop — Alt 1, Desktop — Alt 2');
+    // Auto snapshot before the job's first edit (Story 5.12), so the whole job can be reverted.
+    expect(msg.snapshotVersionId).toBeTruthy();
   });
 
   it('builds kind-specific inputs and rejects empty requests', async () => {

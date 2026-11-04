@@ -40,6 +40,7 @@ import { getDoc, LockedError } from './design-docs';
 import { resolveProjectDesignSystem } from './project-design-system';
 import { getProject } from './projects';
 import { getModelSettings } from './agent/model-settings';
+import { snapshotBeforeAgentEdit } from './agent/snapshots';
 import { createDbToolHost } from './agent/tool-host';
 import { ProviderError, streamModel, type LlmProxyDeps } from './llm-proxy';
 import { NotFoundError, ValidationError, type Actor } from './types';
@@ -436,7 +437,7 @@ export interface RunDeps {
   flushMs?: number;
   /** How often to check for cancellation while the model is thinking (ms). */
   cancelPollMs?: number;
-  /** Runs before the message's first transaction (auto snapshot, Story 5.12). */
+  /** Runs before the message's first transaction. Defaults to the auto snapshot (Story 5.12). */
   beforeFirstCommit?: (messageId: string) => Promise<void>;
 }
 
@@ -522,9 +523,10 @@ export async function runAssistantMessage(
       scope: scope
         ? { rootNodeId: scope.nodeId, allowWider: Boolean(scope.allowWider) }
         : undefined,
-      beforeFirstCommit: deps.beforeFirstCommit
-        ? () => deps.beforeFirstCommit!(messageId)
-        : undefined,
+      beforeFirstCommit: () =>
+        deps.beforeFirstCommit
+          ? deps.beforeFirstCommit(messageId)
+          : snapshotBeforeAgentEdit(db, actor, conv.projectId, messageId).then(() => undefined),
     });
     const history = await historyBefore(db, conv.id, userRow.seq);
     const ctx = {

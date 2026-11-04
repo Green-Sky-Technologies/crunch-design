@@ -8,6 +8,7 @@ import { contractToolDefs, executeTool, type ToolHost } from '@crunch/agent';
 import { agentMessages, eq, type Db } from '@crunch/db';
 import { appendJobEvent, jobActor } from '../jobs';
 import { JobTokenError, tokenFromHeaders, verifyJobToken } from './job-tokens';
+import { snapshotBeforeAgentEdit } from './snapshots';
 import { createDbToolHost } from './tool-host';
 
 const PROTOCOL_VERSION = '2025-06-18';
@@ -70,6 +71,8 @@ export async function handleJobMcp(db: Db, req: Request, jobId: string): Promise
       projectId: job.projectId,
       agentMessageId: msg.id,
       runtime: 'job',
+      beforeFirstCommit: () =>
+        snapshotBeforeAgentEdit(db, actor, job.projectId!, msg.id).then(() => undefined),
       onFrameCreated: async (f) =>
         void (await appendJobEvent(db, job.id, 'frame', { frameId: f.id, name: f.name })),
     });

@@ -9,6 +9,7 @@ import { Composer } from './composer';
 import { JobCard, JobSuggestionCard } from './job-card';
 import { MessageItem } from './message-item';
 import { ModelPicker, useAgentSettings } from './model-picker';
+import { RevertButton } from './revert-button';
 import { SliderTray } from './slider-tray';
 import { useAgentChat } from './use-agent-chat';
 
@@ -81,6 +82,14 @@ export function AgentPane() {
                   <JobSuggestionCard s={m.jobSuggestion} canRun={live} onStart={startJob} />
                 )}
                 {m.jobId && <JobCard jobId={m.jobId} canRun={live} />}
+                {m.snapshotVersionId &&
+                  m.txnIds.length > 0 &&
+                  can('design:edit') &&
+                  !['pending', 'streaming'].includes(m.status) && (
+                    <div className="mt-1">
+                      <RevertButton messageId={m.id} />
+                    </div>
+                  )}
               </>
             }
           />
