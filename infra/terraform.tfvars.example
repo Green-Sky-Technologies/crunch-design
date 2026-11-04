@@ -1,8 +1,0 @@
-vercel_team_id = "team_xxx"
-neon_org_id    = "org-xxx"
-# github_repo  = "M-McCallum/CrunchDesign"
-
-clerk_publishable_key        = { production = "pk_live_...", preview = "pk_test_..." }
-clerk_secret_key             = { production = "sk_live_...", preview = "sk_test_..." }
-clerk_webhook_signing_secret = { production = "whsec_...", preview = "whsec_..." }
-credentials_master_keys      = { production = "k1:...", preview = "k1:..." }
