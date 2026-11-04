@@ -277,3 +277,47 @@ export type DesignDoc = z.infer<typeof designDoc>;
 export function emptyDoc(): DesignDoc {
   return { schemaVersion: SCHEMA_VERSION, frames: [], nodes: {}, sliders: [], tokenOverrides: {} };
 }
+
+/** The document a new project starts with: one empty desktop frame. */
+export function initialDoc(): DesignDoc {
+  const rootId = newId('n');
+  const frameId = newId('f');
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    frames: [
+      {
+        id: frameId,
+        name: 'Desktop',
+        rootNodeId: rootId,
+        canvas: { x: 0, y: 0 },
+        width: 1280,
+        height: 800,
+        previewBreakpoints: [],
+      },
+    ],
+    nodes: {
+      [rootId]: {
+        id: rootId,
+        type: 'box',
+        tag: 'main',
+        name: 'Page',
+        parentId: null,
+        children: [],
+        positioning: 'flow',
+        props: {},
+        style: {
+          base: {
+            display: 'flex',
+            flexDirection: 'column',
+            width: 'fill',
+            minHeight: '100%',
+            backgroundColor: { token: 'color.background' },
+            fontFamily: { token: 'font.sans' },
+          },
+        },
+      },
+    },
+    sliders: [],
+    tokenOverrides: {},
+  };
+}

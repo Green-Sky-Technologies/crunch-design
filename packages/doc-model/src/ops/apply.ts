@@ -391,3 +391,30 @@ export function touchedNodeIds(op: DocOp): string[] {
       return [];
   }
 }
+
+/**
+ * Ops that turn `from` into `to` wholesale (version restore, import replace). Applying them goes
+ * through the normal reducer, so the transaction gets an exact inverse like any other.
+ */
+export function replaceDocOps(from: DesignDoc, to: DesignDoc): DocOp[] {
+  const ops: DocOp[] = [];
+  for (const s of from.sliders) ops.push({ op: 'removeSlider', id: s.id });
+  for (const f of from.frames) ops.push({ op: 'removeFrame', id: f.id });
+  for (const path of Object.keys(from.tokenOverrides))
+    ops.push({ op: 'setTokenOverride', path, value: null });
+  to.frames.forEach((f, index) => {
+    const nodes: Node[] = [];
+    const stack = [f.rootNodeId];
+    while (stack.length) {
+      const n = to.nodes[stack.pop()!];
+      if (!n) continue;
+      nodes.push(n);
+      for (let i = n.children.length - 1; i >= 0; i--) stack.push(n.children[i]!);
+    }
+    ops.push({ op: 'insertFrame', index, frame: f, nodes });
+  });
+  to.sliders.forEach((slider, index) => ops.push({ op: 'upsertSlider', slider, index }));
+  for (const [path, value] of Object.entries(to.tokenOverrides))
+    ops.push({ op: 'setTokenOverride', path, value });
+  return ops;
+}

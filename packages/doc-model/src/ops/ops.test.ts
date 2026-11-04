@@ -313,3 +313,14 @@ describe('ops: properties', () => {
     );
   });
 });
+
+describe('replaceDocOps / initialDoc', () => {
+  it('replaces a doc wholesale and inverts exactly', async () => {
+    const { initialDoc, replaceDocOps, parseDoc } = await import('../index');
+    const from = sampleLandingDoc();
+    const to = parseDoc(initialDoc());
+    const { doc, inverse } = applyOps(from, replaceDocOps(from, to));
+    expect(doc).toEqual(to);
+    expect(applyOps(doc, inverse).doc).toEqual(from);
+  });
+});
