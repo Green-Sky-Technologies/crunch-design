@@ -1,8 +1,34 @@
-/** Upsert Figma variables from a plan (push, Story 8.2; token sync, Story 8.4). */
-import { modeKey, PLUGIN_TOKEN_KEY, type VariablesSpec } from '@crunch/figma-convert/plugin';
+/**
+ * Upsert Figma variables from a plan.
+ *
+ * Two policies:
+ * - 'create-missing' (design push, Story 8.2): create variables that don't exist and bind to ones
+ *   that do, but never change an existing variable. Existing variables whose values differ are
+ *   reported so the user can review them in the Tokens tab, where the 8.4 diff and conflict
+ *   rules apply.
+ * - 'overwrite' (token sync push, Story 8.4): write the values the user reviewed and selected.
+ *
+ * The Figma variables API is injected (defaults to `figma.variables`) so this is testable.
+ */
+import {
+  modeKey,
+  PLUGIN_TOKEN_KEY,
+  sameVariableValue,
+  type FigmaVariableValue,
+  type VariablesSpec,
+} from '@crunch/figma-convert/plugin';
 import type { Note } from './note';
 
 export const COLLECTION_KEY = 'cd:collection';
+
+export type VariablesApi = Pick<
+  PluginAPI['variables'],
+  | 'getLocalVariableCollectionsAsync'
+  | 'getLocalVariablesAsync'
+  | 'createVariableCollection'
+  | 'createVariable'
+  | 'createVariableAlias'
+>;
 
 export interface UpsertResult {
   byPath: Map<string, Variable>;
@@ -11,25 +37,31 @@ export interface UpsertResult {
   modes: Record<string, string>;
   created: number;
   updated: number;
+  /** Token paths of existing variables whose values differ and were left alone. */
+  differs: string[];
 }
 
-async function findCollection(name: string): Promise<VariableCollection | null> {
-  const all = await figma.variables.getLocalVariableCollectionsAsync();
-  return (
-    all.find((c) => c.getPluginData(COLLECTION_KEY) === '1') ??
-    all.find((c) => c.name === name) ??
-    null
-  );
+export interface UpsertOptions {
+  remove?: string[];
+  policy?: 'overwrite' | 'create-missing';
+  api?: VariablesApi;
 }
 
 export async function upsertVariables(
   spec: VariablesSpec,
   note: Note,
-  opts: { remove?: string[] } = {},
+  opts: UpsertOptions = {},
 ): Promise<UpsertResult> {
-  let col = await findCollection(spec.collectionName);
+  const api = opts.api ?? figma.variables;
+  const policy = opts.policy ?? 'overwrite';
+  const all = await api.getLocalVariableCollectionsAsync();
+  let col =
+    all.find((c) => c.getPluginData(COLLECTION_KEY) === '1') ??
+    all.find((c) => c.name === spec.collectionName) ??
+    null;
+  const newCollection = !col;
   if (!col) {
-    col = figma.variables.createVariableCollection(spec.collectionName);
+    col = api.createVariableCollection(spec.collectionName);
     col.renameMode(col.defaultModeId, spec.modes[0]!);
   }
   col.setPluginData(COLLECTION_KEY, '1');
@@ -42,6 +74,14 @@ export async function upsertVariables(
   const modeId = (name: string) => modes[modeKey(name)];
   for (const name of spec.modes.slice(1)) {
     if (modeId(name)) continue;
+    if (policy === 'create-missing' && !newCollection) {
+      note(
+        'info',
+        `The "${name}" mode isn't in this Figma collection; add it with Tokens → Push`,
+        name,
+      );
+      continue;
+    }
     try {
       modes[modeKey(name)] = col.addMode(name);
     } catch {
@@ -55,7 +95,7 @@ export async function upsertVariables(
   const covered = new Set(spec.modes.map((m) => modeId(m)).filter((x): x is string => !!x));
   const allModeIds = col.modes.map((m) => m.modeId);
 
-  const existing = (await figma.variables.getLocalVariablesAsync()).filter(
+  const existing = (await api.getLocalVariablesAsync()).filter(
     (v) => v.variableCollectionId === col.id,
   );
   const byPath = new Map<string, Variable>();
@@ -67,6 +107,8 @@ export async function upsertVariables(
 
   let created = 0;
   let updated = 0;
+  const fresh = new Set<string>();
+  const differs: string[] = [];
   for (const vs of spec.variables) {
     let v = byPath.get(vs.path) ?? byName.get(vs.name);
     if (v && v.resolvedType !== vs.type) {
@@ -75,17 +117,21 @@ export async function upsertVariables(
         `Variable "${v.name}" is a ${v.resolvedType} in Figma but the token is ${vs.type}; skipped`,
         vs.path,
       );
+      byPath.delete(vs.path);
       continue;
     }
     if (!v) {
-      v = figma.variables.createVariable(vs.name, col, vs.type);
+      v = api.createVariable(vs.name, col, vs.type);
+      v.setPluginData(PLUGIN_TOKEN_KEY, vs.path);
+      if (vs.description !== undefined) v.description = vs.description;
+      fresh.add(vs.path);
       created++;
-    } else {
+    } else if (policy === 'overwrite') {
       updated++;
       if (v.name !== vs.name) v.name = vs.name;
+      v.setPluginData(PLUGIN_TOKEN_KEY, vs.path);
+      if (vs.description !== undefined) v.description = vs.description;
     }
-    v.setPluginData(PLUGIN_TOKEN_KEY, vs.path);
-    if (vs.description !== undefined) v.description = vs.description;
     byPath.set(vs.path, v);
   }
 
@@ -99,7 +145,7 @@ export async function upsertVariables(
         note('warning', `Alias target "${value.alias}" missing; value skipped`, path);
         return null;
       }
-      return figma.variables.createVariableAlias(target);
+      return api.createVariableAlias(target);
     }
     return value as VariableValue;
   };
@@ -108,6 +154,21 @@ export async function upsertVariables(
   for (const vs of spec.variables) {
     const v = byPath.get(vs.path);
     if (!v || v.resolvedType !== vs.type) continue;
+    if (policy === 'create-missing' && !fresh.has(vs.path)) {
+      const same = Object.entries(vs.valuesByMode).every(([mode, value]) => {
+        const id = modeId(mode);
+        return (
+          !id ||
+          sameVariableValue(
+            value,
+            v.valuesByMode[id] as FigmaVariableValue | undefined,
+            (p) => byPath.get(p)?.id,
+          )
+        );
+      });
+      if (!same) differs.push(vs.path);
+      continue;
+    }
     try {
       for (const [mode, value] of Object.entries(vs.valuesByMode)) {
         const id = modeId(mode);
@@ -126,6 +187,13 @@ export async function upsertVariables(
       note('error', `Couldn't set values: ${e instanceof Error ? e.message : String(e)}`, vs.path);
     }
   }
+  for (const path of differs) {
+    note(
+      'warning',
+      'Figma variable differs from the design system and was not changed; review it in the Tokens tab',
+      path,
+    );
+  }
 
   for (const path of opts.remove ?? []) {
     const v = byPath.get(path);
@@ -134,5 +202,5 @@ export async function upsertVariables(
       byPath.delete(path);
     }
   }
-  return { byPath, collectionId: col.id, modes, created, updated };
+  return { byPath, collectionId: col.id, modes, created, updated, differs };
 }

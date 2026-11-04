@@ -100,7 +100,12 @@ function view(): HTMLElement {
     state.projectId ? framesView() : null,
     h('label', {}, 'Width (picks the breakpoint)'),
     widthSelect,
-    h('label', { class: 'row-label' }, vars, 'Push tokens as Figma variables and bind them'),
+    h(
+      'label',
+      { class: 'row-label' },
+      vars,
+      'Bind to Figma variables (creates missing ones; never changes existing values; use the Tokens tab to sync values)',
+    ),
     h(
       'button',
       {

@@ -600,7 +600,8 @@ export async function applyPushPlan(
   let vars = new Map<string, Variable>();
   if (plan.variables && plan.variables.variables.length) {
     progress(`Updating ${plan.variables.variables.length} variables…`);
-    vars = (await upsertVariables(plan.variables, note)).byPath;
+    // Design pushes never overwrite existing variables: differing values go through Tokens sync.
+    vars = (await upsertVariables(plan.variables, note, { policy: 'create-missing' })).byPath;
   }
 
   const all = [...plan.frames.map((f) => f.root), ...plan.components.map((c) => c.root)].flatMap(
