@@ -194,11 +194,22 @@ export const clerkMembershipVerifier: MembershipVerifier = async (clerkOrgId, us
   const { clerkClient } = await import('@clerk/nextjs/server');
   const { roleFromClerk } = await import('@crunch/authz');
   const client = await clerkClient();
-  const list = await client.organizations.getOrganizationMembershipList({
-    organizationId: clerkOrgId,
-    userId: [userId],
-    limit: 1,
-  });
+  let list;
+  try {
+    list = await client.organizations.getOrganizationMembershipList({
+      organizationId: clerkOrgId,
+      userId: [userId],
+      limit: 1,
+    });
+  } catch (e) {
+    // The organization no longer exists: nobody is a member. Anything else is "unreachable".
+    if ((e as { status?: number }).status === 404) return { member: false };
+    console.error(
+      '[plugin-tokens] Clerk membership check failed',
+      e instanceof Error ? e.name : typeof e,
+    );
+    throw e;
+  }
   const m = list.data.find((x) => x.publicUserData?.userId === userId);
   return m ? { member: true, role: roleFromClerk(m.role) } : { member: false };
 };
