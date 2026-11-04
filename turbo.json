@@ -9,13 +9,21 @@
         "NEXT_PUBLIC_*",
         "CLERK_*",
         "DATABASE_URL",
-        "CREDENTIALS_MASTER_KEY",
-        "BLOB_READ_WRITE_TOKEN"
+        "BLOB_READ_WRITE_TOKEN",
+        "CREDENTIALS_MASTER_KEYS"
       ]
     },
-    "dev": { "cache": false, "persistent": true },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
     "lint": {},
-    "typecheck": { "dependsOn": ["^typecheck"] },
-    "test": { "dependsOn": ["^build"], "env": ["DATABASE_URL"] }
+    "typecheck": {
+      "dependsOn": ["^typecheck"]
+    },
+    "test": {
+      "dependsOn": ["^build"],
+      "env": ["DATABASE_URL", "TEST_DATABASE_URL"]
+    }
   }
 }
