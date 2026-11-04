@@ -145,7 +145,8 @@ export function pluginNodeToRest(
     if (v) (out as unknown as Obj)[k] = v;
   }
   for (const k of COPY_NUMBER) if (isNum(n[k])) (out as unknown as Obj)[k] = n[k];
-  if (isNum(n.rotation) && n.rotation !== 0) out.rotation = n.rotation;
+  // The plugin API reports degrees; the REST shape (and the importer) uses radians.
+  if (isNum(n.rotation) && n.rotation !== 0) out.rotation = (n.rotation * Math.PI) / 180;
   const bb = n.absoluteBoundingBox as Obj | null | undefined;
   if (bb && isNum(bb.width))
     out.absoluteBoundingBox = {

@@ -65,6 +65,7 @@ export interface FigmaNode {
   type: string;
   visible?: boolean;
   opacity?: number;
+  /** Radians, counter-clockwise (REST convention; the plugin serializer converts from degrees). */
   rotation?: number;
   children?: FigmaNode[];
   absoluteBoundingBox?: z.infer<typeof rect> | null;

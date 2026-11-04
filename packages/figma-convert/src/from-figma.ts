@@ -301,7 +301,8 @@ class Importer {
     }
     if (n.opacity !== undefined && n.opacity < 1)
       this.set(style, 'opacity', round(n.opacity, 3), n);
-    if (n.rotation) this.set(style, 'rotate', round(-n.rotation), n);
+    // REST `rotation` is in radians, counter-clockwise; CSS rotate is degrees, clockwise.
+    if (n.rotation) this.set(style, 'rotate', round((-n.rotation * 180) / Math.PI), n);
   }
 
   private layout(n: FigmaNode, style: StyleProps) {

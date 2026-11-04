@@ -442,3 +442,45 @@ describe('pluginNodeToRest', () => {
     );
   });
 });
+
+describe('rotation units', () => {
+  const frameWith = (child: FigmaNode): FigmaNode => ({
+    id: '7:1',
+    name: 'Root',
+    type: 'FRAME',
+    absoluteBoundingBox: { x: 0, y: 0, width: 400, height: 400 },
+    layoutMode: 'VERTICAL',
+    children: [child],
+  });
+  const rotateOf = (r: ReturnType<typeof figmaToDoc>) =>
+    r.frames[0]!.nodes.find((n) => n.name === 'Tilted')!.style.base?.rotate;
+
+  it('treats REST rotation as radians (counter-clockwise) -> CSS degrees (clockwise)', () => {
+    const rest: FigmaNode = {
+      id: '7:2',
+      name: 'Tilted',
+      type: 'FRAME',
+      rotation: Math.PI / 4,
+      absoluteBoundingBox: { x: 0, y: 0, width: 100, height: 100 },
+    };
+    expect(rotateOf(figmaToDoc([frameWith(rest)], { newId: ids }))).toBe(-45);
+  });
+
+  it('converts plugin rotation (degrees) through the serializer', () => {
+    const MIXED = Symbol('mixed');
+    const plugin = {
+      id: '7:3',
+      name: 'Tilted',
+      type: 'FRAME',
+      rotation: 30,
+      absoluteBoundingBox: { x: 0, y: 0, width: 100, height: 100 },
+      children: [],
+    };
+    const rest = pluginNodeToRest(
+      { ...frameWith({ id: '0:0', name: 'x', type: 'FRAME' }), children: [plugin] },
+      MIXED,
+    );
+    expect(rest.children![0]!.rotation).toBeCloseTo(Math.PI / 6);
+    expect(rotateOf(figmaToDoc([rest], { newId: ids }))).toBe(-30);
+  });
+});
