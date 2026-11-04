@@ -7,6 +7,19 @@ import { applyOps, sampleLandingDoc, starterDesignSystem, type DesignDoc } from 
 import { render } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { EditorProvider, useDocStoreApi, type DocApi, type DocStore } from '../doc-store';
+import { setLockApi, type LockApi, type LockState } from './lock';
+
+/** Lock server that always grants the lock (canvas tests that aren't about locking). */
+const free: LockState = { lock: null, presence: [], canTakeOver: false, ttlMs: 120_000 };
+export const grantingLockApi: LockApi = {
+  acquire: async () => ({ acquired: true, state: free }),
+  heartbeat: async () => free,
+  release: async () => free,
+  request: async () => free,
+  decline: async () => free,
+  takeOver: async () => free,
+};
+setLockApi(grantingLockApi);
 
 export function memoryApi(initial: DesignDoc) {
   let doc = initial;

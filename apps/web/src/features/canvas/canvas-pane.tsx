@@ -14,6 +14,7 @@ import { useCanvas, useCanvasStoreApi } from './canvas-store';
 import { ViewportCtx } from './context';
 import { FrameChrome } from './frame-chrome';
 import { LayersPanel } from './layers-panel';
+import { useEditLockLoop } from './lock';
 import { RegisteredOverlays } from './overlay-api';
 import { GuidesOverlay, ResizeHandles } from './resize-handles';
 import { useSelectionInput } from './selection-input';
@@ -199,6 +200,7 @@ export function CanvasPane() {
   useViewport(viewportRef);
   useCameraGestures(viewportRef);
   useSelectionInput(viewportRef);
+  useEditLockLoop();
 
   useEffect(() => {
     const el = viewportRef.current!;
