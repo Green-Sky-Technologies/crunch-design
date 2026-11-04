@@ -8,8 +8,8 @@
  * The camera changes on every pan/zoom frame. The world layer applies it by subscribing and
  * writing `transform` directly, so frames never re-render for camera moves (ADR 0001).
  */
-import { type Camera } from '@crunch/canvas';
-import type { Breakpoint } from '@crunch/doc-model';
+import { frameBreakpoint, type Camera, type Rect } from '@crunch/canvas';
+import type { Breakpoint, DesignSystemSpec, Frame } from '@crunch/doc-model';
 import { useStore } from 'zustand';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import { useDocStoreApi, type DocStore } from '../doc-store';
@@ -39,6 +39,12 @@ export interface CanvasState {
   /** Breakpoint the inspector edits; null follows the selected frame's breakpoint. */
   editBreakpoint: Breakpoint | null;
   setEditBreakpoint(bp: Breakpoint | null): void;
+  /** Drop indicator during a flow drag, in world coordinates. */
+  drop: { line: Rect; container: Rect } | null;
+  /** Smart guides during resize/absolute moves, in world coordinates. */
+  guides: { lines: Rect[]; label?: { x: number; y: number; text: string } } | null;
+  setDrop(d: CanvasState['drop']): void;
+  setGuides(g: CanvasState['guides']): void;
   setCamera(c: Camera): void;
   setViewport(s: Size): void;
   setSize(frameId: string, s: Size): void;
@@ -63,6 +69,10 @@ export function createCanvasStore(): CanvasStore {
     layersOpen: true,
     framePreview: null,
     editBreakpoint: null,
+    drop: null,
+    guides: null,
+    setDrop: (drop) => set({ drop }),
+    setGuides: (guides) => set({ guides }),
     setEditBreakpoint: (editBreakpoint) => set({ editBreakpoint }),
     setFramePreview: (framePreview) => set({ framePreview }),
     setCamera: (camera) => set({ camera }),
@@ -82,6 +92,15 @@ export function createCanvasStore(): CanvasStore {
     setFitted: () => set({ fitted: true }),
     toggleLayers: (open) => set((st) => ({ layersOpen: open ?? !st.layersOpen })),
   }));
+}
+
+/** Breakpoint canvas edits target: the inspector override, else the frame's own breakpoint. */
+export function editBreakpointFor(
+  canvas: CanvasStore,
+  frame: Frame | undefined,
+  ds: DesignSystemSpec,
+): Breakpoint {
+  return canvas.getState().editBreakpoint ?? (frame ? frameBreakpoint(frame, ds) : 'base');
 }
 
 const stores = new WeakMap<DocStore, CanvasStore>();

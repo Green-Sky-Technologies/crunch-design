@@ -14,10 +14,11 @@ import {
   topLevelSelection,
 } from '@crunch/canvas';
 import { useEffect, type RefObject } from 'react';
-import { useDocStoreApi, type DocStore } from '../doc-store';
+import { useDocStoreApi, useEditor, type DocStore } from '../doc-store';
 import { useCanvasStoreApi } from './canvas-store';
 import { frameIndex } from './context';
 import { hitFromEvent } from './dom';
+import { startNodeDrag } from './drag';
 import { isTypingEvent } from './gesture';
 
 /** Keyboard navigation over the tree. Returns true if the key was handled. */
@@ -75,6 +76,7 @@ export function handleTreeKey(store: DocStore, e: KeyboardEvent): boolean {
 export function useSelectionInput(viewportRef: RefObject<HTMLDivElement | null>) {
   const store = useDocStoreApi();
   const canvas = useCanvasStoreApi();
+  const ds = useEditor().designSystem.spec;
 
   useEffect(() => {
     const el = viewportRef.current!;
@@ -88,8 +90,10 @@ export function useSelectionInput(viewportRef: RefObject<HTMLDivElement | null>)
       const additive = e.shiftKey;
       const prev = s.selection.frameId === hit.frameId ? s.selection.nodeIds : [];
       // Pressing an already-selected node keeps a multi-selection intact (so it can be dragged).
-      if (!additive && prev.includes(id)) return;
-      s.select({ frameId: hit.frameId, nodeIds: toggleSelection(prev, id, additive) });
+      if (additive || !prev.includes(id))
+        s.select({ frameId: hit.frameId, nodeIds: toggleSelection(prev, id, additive) });
+      if (store.getState().selection.nodeIds.includes(id))
+        startNodeDrag({ docStore: store, canvas, viewport: el, ds }, e, { ...hit, nodeId: id });
     };
     const onMove = (e: PointerEvent) => {
       const c = canvas.getState();
@@ -127,5 +131,5 @@ export function useSelectionInput(viewportRef: RefObject<HTMLDivElement | null>)
       el.removeEventListener('click', onClick, true);
       window.removeEventListener('keydown', onKey);
     };
-  }, [viewportRef, store, canvas]);
+  }, [viewportRef, store, canvas, ds]);
 }

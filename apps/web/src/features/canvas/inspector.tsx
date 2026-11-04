@@ -28,6 +28,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { useDocStore, useDocStoreApi, useEditor } from '../doc-store';
 import { useCanvas, useCanvasStoreApi } from './canvas-store';
 import { frameIndex } from './context';
+import { positioningOps } from './drag';
 import { StyleField, type ApplyMeta } from './style-field';
 
 const GROUPS = inspectorGroups();
@@ -98,7 +99,7 @@ function BreakpointTabs({ bp, frameBp }: { bp: Breakpoint; frameBp: Breakpoint |
   );
 }
 
-function NodeMeta({ nodes, readOnly }: { nodes: Node[]; readOnly: boolean }) {
+function NodeMeta({ nodes, readOnly, bp }: { nodes: Node[]; readOnly: boolean; bp: Breakpoint }) {
   const docStore = useDocStoreApi();
   const n = nodes[0]!;
   const [draft, setDraft] = useState<string | null>(null);
@@ -146,10 +147,22 @@ function NodeMeta({ nodes, readOnly }: { nodes: Node[]; readOnly: boolean }) {
               aria-checked={n.positioning === p}
               disabled={readOnly || !n.parentId}
               className={`px-2 py-0.5 ${n.positioning === p ? 'bg-surface-2 font-medium' : ''}`}
-              onClick={() =>
-                n.positioning !== p &&
-                meta({ positioning: p }, p === 'absolute' ? 'Make absolute' : 'Return to flow')
-              }
+              onClick={() => {
+                if (n.positioning === p) return;
+                // Keep the node where it is: absolute gets top/left from its current layout box.
+                const s = docStore.getState();
+                const ops = positioningOps(
+                  s.doc,
+                  nodes.map((x) => x.id),
+                  p,
+                  bp,
+                  document,
+                );
+                s.apply(ops, {
+                  source: 'inspector',
+                  label: p === 'absolute' ? 'Make absolute' : 'Return to flow',
+                });
+              }}
             >
               {p === 'flow' ? 'Flow' : 'Absolute'}
             </button>
@@ -216,7 +229,7 @@ function NodeInspector({ ids, frame }: { ids: string[]; frame: Frame | undefined
 
   return (
     <div data-testid="inspector">
-      <NodeMeta key={primary.id} nodes={nodes} readOnly={readOnly} />
+      <NodeMeta key={primary.id} nodes={nodes} readOnly={readOnly} bp={bp} />
       <BreakpointTabs bp={bp} frameBp={frameBp} />
       <div className="px-3 pb-1">
         <input

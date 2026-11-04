@@ -89,6 +89,27 @@ const tag: React.CSSProperties = {
   color: '#fff',
 };
 
+/** Flow drop target: the container outline and the insertion line. */
+export function DropIndicator() {
+  const drop = useCanvas((s) => s.drop);
+  const camera = useCanvas((s) => s.camera);
+  if (!drop) return null;
+  return (
+    <div data-cd-drop="">
+      <Box
+        r={worldRectToScreen(camera, drop.container)}
+        style={{ outline: `1px dashed ${ACCENT}`, background: 'rgba(255,90,31,.04)' }}
+      />
+      <Box
+        r={worldRectToScreen(camera, drop.line)}
+        style={{ background: ACCENT, minWidth: 2, minHeight: 2, borderRadius: 1 }}
+      >
+        <span data-testid="drop-line" hidden />
+      </Box>
+    </div>
+  );
+}
+
 export function SelectionOverlay() {
   const doc = useDocStore((s) => s.doc);
   const selection = useDocStore((s) => s.selection);

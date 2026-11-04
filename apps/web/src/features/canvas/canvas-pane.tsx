@@ -16,7 +16,7 @@ import { FrameChrome } from './frame-chrome';
 import { LayersPanel } from './layers-panel';
 import { RegisteredOverlays } from './overlay-api';
 import { useSelectionInput } from './selection-input';
-import { SelectionOverlay } from './selection-overlay';
+import { DropIndicator, SelectionOverlay } from './selection-overlay';
 import { isTypingEvent, startGesture } from './gesture';
 import { Minimap } from './minimap';
 import { CanvasToolbar } from './toolbar';
@@ -232,6 +232,7 @@ export function CanvasPane() {
           style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}
         >
           <SelectionOverlay />
+          <DropIndicator />
           <FrameChrome />
           <RegisteredOverlays />
         </div>

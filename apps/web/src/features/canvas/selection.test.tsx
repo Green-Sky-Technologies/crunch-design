@@ -10,6 +10,11 @@ afterEach(cleanup);
 
 const FRAME = 'f_desktop001';
 const node = (id: string) => frameRoot(FRAME)!.querySelector<HTMLElement>(`[data-cd-id="${id}"]`)!;
+/** A real click: press and release (an unreleased press is a pending drag). */
+const press = (el: HTMLElement, shiftKey = false) => {
+  fireEvent.pointerDown(el, { button: 0, shiftKey, pointerId: 1 });
+  fireEvent.pointerUp(window, { pointerId: 1 });
+};
 const nextFrame = () => act(() => new Promise<void>((r) => requestAnimationFrame(() => r())));
 
 async function setup(role: 'editor' | 'viewer' = 'editor') {
@@ -21,19 +26,19 @@ async function setup(role: 'editor' | 'viewer' = 'editor') {
 describe('selection (Story 3.2)', () => {
   it('selects the clicked node inside a frame; Shift adds; instances are one node', async () => {
     const { sel } = await setup();
-    fireEvent.pointerDown(node('n_herotitle1'), { button: 0 });
+    press(node('n_herotitle1'));
     expect(sel()).toEqual({ frameId: FRAME, nodeIds: ['n_herotitle1'] });
     // a click on a part of a Button instance selects the instance
     const part = node('n_herocta001').querySelector('[data-cd-part]') as HTMLElement;
-    fireEvent.pointerDown(part ?? node('n_herocta001'), { button: 0, shiftKey: true });
+    press(part ?? node('n_herocta001'), true);
     expect(sel().nodeIds).toEqual(['n_herotitle1', 'n_herocta001']);
-    fireEvent.pointerDown(node('n_herotitle1'), { button: 0, shiftKey: true });
+    press(node('n_herotitle1'), true);
     expect(sel().nodeIds).toEqual(['n_herocta001']);
   });
 
   it('navigates the tree with Esc, Enter and Tab, and deletes with Delete', async () => {
     const { sel, store } = await setup();
-    fireEvent.pointerDown(node('n_herotitle1'), { button: 0 });
+    press(node('n_herotitle1'));
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(sel().nodeIds).toEqual(['n_hero000001']);
     fireEvent.keyDown(window, { key: 'Enter' });
@@ -51,7 +56,7 @@ describe('selection (Story 3.2)', () => {
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(sel()).toEqual({ frameId: null, nodeIds: [] });
 
-    fireEvent.pointerDown(node('n_herobody01'), { button: 0 });
+    press(node('n_herobody01'));
     fireEvent.keyDown(window, { key: 'Delete' });
     expect(store().getState().doc.nodes['n_herobody01']).toBeUndefined();
     expect(sel().nodeIds).toEqual(['n_hero000001']);
@@ -61,7 +66,7 @@ describe('selection (Story 3.2)', () => {
 
   it('viewers can select and navigate but not delete', async () => {
     const { sel, store } = await setup('viewer');
-    fireEvent.pointerDown(node('n_herobody01'), { button: 0 });
+    press(node('n_herobody01'));
     expect(sel().nodeIds).toEqual(['n_herobody01']);
     fireEvent.keyDown(window, { key: 'Delete' });
     expect(store().getState().doc.nodes['n_herobody01']).toBeDefined();
@@ -74,7 +79,7 @@ describe('selection (Story 3.2)', () => {
     fakeRect(screen.getByTestId('canvas'), { x: 0, y: 0, width: 1000, height: 800 });
     // world rect = (screen - camera) / z = (110-10)/2, (220-20)/2 -> 50,100 size 40x15
     fakeRect(node('n_herotitle1'), { x: 110, y: 220, width: 80, height: 30 });
-    fireEvent.pointerDown(node('n_herotitle1'), { button: 0 });
+    press(node('n_herotitle1'));
     await nextFrame();
     const box = document.querySelector('[data-cd-selected="n_herotitle1"]')!.parentElement!;
     expect([box.style.left, box.style.top, box.style.width]).toEqual(['110px', '220px', '80px']);
@@ -93,10 +98,10 @@ describe('selection (Story 3.2)', () => {
     fireEvent.click(within(tree).getByRole('button', { name: 'Hero' }));
     expect(sel().nodeIds).toEqual(['n_hero000001']);
     // selecting on the canvas expands the ancestors in the panel
-    fireEvent.pointerDown(node('n_feat2title0'), { button: 0 });
+    press(node('n_feat2title0'));
     const row = within(tree).getByRole('button', { name: 'Your design system' });
     expect(row.closest('li')!.getAttribute('aria-selected')).toBe('true');
-    fireEvent.pointerDown(node('n_herotitle1'), { button: 0 });
+    press(node('n_herotitle1'));
     fireEvent.click(within(tree).getByRole('button', { name: 'Hide Headline' }));
     expect(store().getState().doc.nodes['n_herotitle1']!.hidden).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: 'Layers' }));

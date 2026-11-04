@@ -8,3 +8,4 @@ export * from './frames';
 export * from './minimap';
 export * from './tree';
 export * from './inspector';
+export * from './dnd';
