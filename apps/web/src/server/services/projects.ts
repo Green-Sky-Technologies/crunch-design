@@ -11,6 +11,9 @@ import {
   type Project,
 } from '@crunch/db';
 import { z } from 'zod';
+// Circular with project-design-system.ts (it imports getProject); safe because both sides only
+// call each other's functions at request time, never during module initialization.
+import { latestPublishedVersionId } from './project-design-system';
 import { NotFoundError, ValidationError, type Actor } from './types';
 
 const nameSchema = z.string().trim().min(1, 'Name is required').max(120, 'Name is too long');
@@ -81,11 +84,18 @@ export async function createProject(
   const name = parse(nameSchema, input.name, 'name');
   const description = parse(descriptionSchema, input.description || undefined, 'description');
   const designSystemId = await defaultDesignSystemId(db, actor.workspace.id);
+  // Pin the latest published version so later draft edits never change this project (Story 4.2).
+  const designSystemVersionId = await latestPublishedVersionId(
+    db,
+    actor.workspace.id,
+    designSystemId,
+  );
   const [p] = await db
     .insert(projects)
     .values({
       workspaceId: actor.workspace.id,
       designSystemId,
+      designSystemVersionId,
       name,
       description: description ?? null,
       createdBy: actor.userId,
@@ -120,6 +130,7 @@ export async function duplicateProject(db: Db, actor: Actor, projectId: string):
     .values({
       workspaceId: src.workspaceId,
       designSystemId: src.designSystemId,
+      designSystemVersionId: src.designSystemVersionId,
       name: `${src.name} (copy)`.slice(0, 120),
       description: src.description,
       thumbnailUrl: src.thumbnailUrl,

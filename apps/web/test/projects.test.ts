@@ -69,3 +69,13 @@ describe('projects', () => {
     );
   });
 });
+
+describe('design-system pinning (Story 4.2 integration)', () => {
+  it('new projects pin the latest published version, and duplicates keep their pin', async () => {
+    const editor = await makeActor(db, 'editor');
+    const p = await createProject(db, editor, { name: 'Pinned' });
+    expect(p.designSystemVersionId).toBeTruthy();
+    const copy = await duplicateProject(db, editor, p.id);
+    expect(copy.designSystemVersionId).toBe(p.designSystemVersionId);
+  });
+});
