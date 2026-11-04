@@ -93,7 +93,8 @@ const tag: React.CSSProperties = {
 export function DropIndicator() {
   const drop = useCanvas((s) => s.drop);
   const camera = useCanvas((s) => s.camera);
-  if (!drop) return null;
+  const editing = useCanvas((s) => s.mode === 'edit');
+  if (!drop || !editing) return null;
   return (
     <div data-cd-drop="">
       <Box
@@ -113,15 +114,37 @@ export function DropIndicator() {
   );
 }
 
+/** Live outline of an insert-tool drag. */
+export function InsertBoxOverlay() {
+  const box = useCanvas((s) => s.insertBox);
+  const camera = useCanvas((s) => s.camera);
+  if (!box) return null;
+  return (
+    <div data-cd-insert-box="">
+      <Box
+        r={worldRectToScreen(camera, box)}
+        style={{
+          outline: `1px solid ${ACCENT}`,
+          background: 'color-mix(in srgb, var(--accent, #cb4b16) 8%, transparent)',
+        }}
+      />
+    </div>
+  );
+}
+
+const NO_IDS: string[] = [];
+
+/** Selection and hover outlines. Edit mode only: in view and comment mode the canvas is a preview. */
 export function SelectionOverlay() {
   const doc = useDocStore((s) => s.doc);
   const selection = useDocStore((s) => s.selection);
-  const hover = useCanvas((s) => s.hover);
+  const editing = useCanvas((s) => s.mode === 'edit');
+  const hover = useCanvas((s) => (s.mode === 'edit' ? s.hover : null));
   const gesture = useCanvas((s) => s.gesture);
   const camera = useCanvas((s) => s.camera);
   const index = frameIndex(doc);
 
-  const selected: Target[] = selection.nodeIds.flatMap((id) => {
+  const selected: Target[] = (editing ? selection.nodeIds : NO_IDS).flatMap((id) => {
     const frameId = index.get(id);
     return frameId ? [{ frameId, nodeId: id }] : [];
   });

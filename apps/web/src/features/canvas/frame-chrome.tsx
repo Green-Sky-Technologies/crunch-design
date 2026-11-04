@@ -18,7 +18,10 @@ const ACCENT = 'var(--accent, #cb4b16)';
 function FrameLabel({ frame, selected }: { frame: Frame; selected: boolean }) {
   const camera = useCanvas((s) => s.camera);
   const preview = useCanvas((s) => (s.framePreview?.frameId === frame.id ? s.framePreview : null));
-  const readOnly = useDocStore((s) => s.readOnly);
+  const docReadOnly = useDocStore((s) => s.readOnly);
+  const editing = useCanvas((s) => s.mode === 'edit');
+  // Outside edit mode labels are just labels: no selecting, moving or renaming.
+  const readOnly = docReadOnly || !editing;
   const docStore = useDocStoreApi();
   const canvas = useCanvasStoreApi();
   const [renaming, setRenaming] = useState(false);
@@ -28,7 +31,7 @@ function FrameLabel({ frame, selected }: { frame: Frame; selected: boolean }) {
   const maxWidth = Math.max(40, (preview?.width ?? frame.width) * camera.z);
 
   const onPointerDown = (e: React.PointerEvent) => {
-    if (e.button !== 0 || renaming) return;
+    if (e.button !== 0 || renaming || !editing) return;
     e.stopPropagation();
     docStore.getState().select({ frameId: frame.id, nodeIds: [] });
     if (readOnly) return;
@@ -277,12 +280,15 @@ function SelectedFrame({ frame }: { frame: Frame }) {
 export function FrameChrome() {
   const frames = useDocStore((s) => s.doc.frames);
   const selection = useDocStore((s) => s.selection);
+  const editing = useCanvas((s) => s.mode === 'edit');
   const selectedFrame =
-    selection.nodeIds.length === 0 ? frames.find((f) => f.id === selection.frameId) : undefined;
+    editing && selection.nodeIds.length === 0
+      ? frames.find((f) => f.id === selection.frameId)
+      : undefined;
   return (
     <>
       {frames.map((f) => (
-        <FrameLabel key={f.id} frame={f} selected={f.id === selection.frameId} />
+        <FrameLabel key={f.id} frame={f} selected={editing && f.id === selection.frameId} />
       ))}
       {selectedFrame && <SelectedFrame frame={selectedFrame} />}
     </>

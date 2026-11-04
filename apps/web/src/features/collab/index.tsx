@@ -1,15 +1,14 @@
 'use client';
 
 /**
- * Collaboration controls in the editor top bar (Epic 6): comments (6.1) with ask-agent
- * requests (5.7), named versions (6.2), share links (6.3), activity
- * feed (6.4), notifications.
- * Reads everything from useEditor() / useDocStore(); no props (editor-shell slot).
+ * Collaboration (Epic 6) for the editor shell: the top-bar controls (comments, versions,
+ * activity, share, notifications), the comments pane that slides over the left (chat) pane, and
+ * comment mode on the canvas. Reads everything from useEditor() / useDocStore().
  */
 import { useEffect } from 'react';
 import { useDocStore, useEditor } from '../doc-store';
 import { ActivityPanel } from './activity-panel';
-import { useAskAgentExtras } from './ask-agent-ui';
+import { useCommentModeOverlay } from './comment-mode';
 import { useCommentPinsOverlay } from './comment-pins';
 import { CommentsPanel } from './comments-panel';
 import { Drawer } from './drawer';
@@ -42,7 +41,7 @@ function PanelButton({
   const toggle = useCollab((s) => s.togglePanel);
   return (
     <button
-      className={`btn-ghost px-2 py-1 ${active ? 'bg-surface-2' : ''}`}
+      className={`btn-ghost px-2 py-1 ${active ? 'bg-surface-2 text-text' : ''}`}
       aria-pressed={active}
       onClick={() => toggle(id)}
     >
@@ -57,6 +56,7 @@ export function CollabControls() {
   const openCount = useCollab((s) => s.threads.filter((t) => t.status === 'open').length);
   useThreadSync(project.id);
   useCommentPinsOverlay();
+  useCommentModeOverlay();
   const doc = useDocStore((s) => s.doc);
   const setDoc = useCollab((s) => s.setDoc);
   useEffect(() => {
@@ -71,7 +71,6 @@ export function CollabControls() {
       <PanelButton id="activity">Activity</PanelButton>
       {can('share:manage') && <PanelButton id="share">Share</PanelButton>}
       <NotificationsBell />
-      {panel === 'comments' && <CommentsDrawer />}
       {panel === 'versions' && (
         <Drawer title="Versions">
           <VersionsPanel />
@@ -91,11 +90,33 @@ export function CollabControls() {
   );
 }
 
-function CommentsDrawer() {
-  const askAgent = useAskAgentExtras();
+/**
+ * The comments pane: a running log of human comment threads, laid over the left pane (the
+ * shell positions it). Renders nothing unless the comments panel is open.
+ */
+export function CommentsPane() {
+  const open = useCollab((s) => s.panel === 'comments');
+  const setPanel = useCollab((s) => s.setPanel);
+  if (!open) return null;
   return (
-    <Drawer title="Comments">
-      <CommentsPanel composerExtras={askAgent.composer} threadExtras={askAgent.thread} />
-    </Drawer>
+    <section
+      role="dialog"
+      aria-label="Comments"
+      className="absolute inset-0 z-20 flex flex-col bg-surface text-sm"
+    >
+      <div className="flex h-10 shrink-0 items-center border-b border-border px-3">
+        <h2 className="font-medium">Comments</h2>
+        <button
+          className="ml-auto text-muted hover:text-text"
+          onClick={() => setPanel(null)}
+          aria-label="Close comments"
+        >
+          ✕
+        </button>
+      </div>
+      <div className="min-h-0 flex-1">
+        <CommentsPanel />
+      </div>
+    </section>
   );
 }

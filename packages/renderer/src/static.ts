@@ -108,3 +108,27 @@ export function renderDocumentHtml(
     `<style>\nbody{margin:0}\n${css}\n</style>\n</head>\n<body>\n${body}\n</body>\n</html>\n`;
   return { html, warnings: shared.warnings };
 }
+
+/**
+ * Static HTML and per-node CSS for one node's subtree (the edit panel's Code tab). Rules are
+ * computed against the node's real parent layout, so fill/hug resolve as they do in the frame.
+ * Shared token/reset CSS is not included.
+ */
+export function renderSubtreeStatic(
+  doc: DesignDoc,
+  ds: DesignSystemSpec,
+  nodeId: string,
+  options: Partial<RenderOptions> = {},
+): { html: string; css: string } {
+  const node = doc.nodes[nodeId];
+  if (!node) throw new Error(`Node ${nodeId} not found`);
+  const ctx: RenderContext = {
+    doc,
+    ds,
+    options: { ...DEFAULT_OPTIONS, annotate: false, ...options },
+  };
+  const parent = node.parentId ? doc.nodes[node.parentId] : undefined;
+  const out: Out = { html: [], css: [] };
+  emit(rnodeFor(node, ds), parent ? layoutOf(parent.style) : ROOT_LAYOUT, ctx, out);
+  return { html: out.html.join(''), css: out.css.filter(Boolean).join('\n') };
+}

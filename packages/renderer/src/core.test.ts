@@ -7,6 +7,7 @@ import {
 import { describe as suite, expect, it } from 'vitest';
 import { layoutOf, nodeRules, ROOT_LAYOUT } from './css';
 import { describe, expandInstance, rnodeFor, DEFAULT_OPTIONS } from './describe';
+import { renderSubtreeStatic } from './static';
 import { sanitizeSvg } from './svg';
 
 const ds = starterDesignSystem();
@@ -128,5 +129,19 @@ suite('sanitizeSvg', () => {
     expect(sanitizeSvg('<svg><text x="1&quot; onload=&quot;x">a<b</text></svg>')).not.toMatch(
       /onload="x"/,
     );
+  });
+});
+
+suite('renderSubtreeStatic (edit panel Code tab)', () => {
+  it('renders one node’s subtree without annotations, against its real parent layout', () => {
+    const doc = sampleLandingDoc();
+    const r = renderSubtreeStatic(doc, ds, 'n_hero000001');
+    expect(r.html.startsWith('<section class="cd-n_hero000001">')).toBe(true);
+    expect(r.html).toContain('Ship designs your engineers can build.');
+    expect(r.html).not.toContain('data-cd-id');
+    expect(r.css).toContain('.cd-n_hero000001');
+    expect(r.css).toContain('.cd-n_herotitle1');
+    expect(r.css).not.toContain('.cd-n_root000001');
+    expect(() => renderSubtreeStatic(doc, ds, 'n_missing001')).toThrow();
   });
 });

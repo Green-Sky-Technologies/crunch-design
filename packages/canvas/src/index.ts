@@ -11,3 +11,4 @@ export * from './inspector';
 export * from './dnd';
 export * from './sizing';
 export * from './snap';
+export * from './insert';

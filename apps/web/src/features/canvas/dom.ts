@@ -92,3 +92,35 @@ export function flowOf(el: Element): {
   const direction = flex && !cs.flexDirection.startsWith('column') ? 'row' : 'column';
   return { display, direction: grid ? 'row' : direction, grid };
 }
+
+/**
+ * The node under a client point inside a canvas viewport, looking through overlay layers to the
+ * frames below (for comment mode and other overlays). With `doc`, locked nodes resolve to their
+ * nearest selectable ancestor, as a canvas click would.
+ */
+export function nodeAtPoint(
+  viewport: Element,
+  clientX: number,
+  clientY: number,
+  doc?: { nodes: Record<string, { id: string; parentId: string | null; locked?: boolean }> },
+): { frameId: string; nodeId: string } | null {
+  const v = viewport.getBoundingClientRect();
+  if (clientX < v.left || clientX > v.right || clientY < v.top || clientY > v.bottom) return null;
+  const stack = document.elementsFromPoint?.(clientX, clientY) ?? [];
+  const host = stack.find(
+    (e): e is HTMLElement =>
+      (e as HTMLElement).dataset?.cdFrameHost !== undefined && viewport.contains(e),
+  );
+  if (!host?.shadowRoot) return null;
+  const inner = (host.shadowRoot.elementsFromPoint?.(clientX, clientY) ?? [])
+    .map((c) => c.closest<HTMLElement>('[data-cd-id]'))
+    .find((c): c is HTMLElement => !!c);
+  if (!inner) return null;
+  let nodeId: string | null = inner.dataset.cdId!;
+  if (doc) {
+    let n = doc.nodes[nodeId];
+    while (n?.locked && n.parentId) n = doc.nodes[n.parentId];
+    nodeId = n && !n.locked ? n.id : null;
+  }
+  return nodeId ? { frameId: host.dataset.cdFrameHost!, nodeId } : null;
+}

@@ -1,9 +1,12 @@
 'use client';
 
 /**
- * One inspector row for a StyleProp: literal input (text, or a select for enums), token picker,
- * breakpoint provenance and reset. Text commits on Enter/blur (one op); arrow keys and scrubbing
- * the label apply live with a coalesce key, so one gesture is one undo step.
+ * One property field (edit panel, Story 3.3): a compact rounded field with the label inside on the
+ * left (drag it to scrub numeric values) and the value right-aligned with its unit. A small accent
+ * dot marks a value set on this node at the current breakpoint; inherited values are muted.
+ * Accepts a literal (text, or a select for enums) or a design-system token (◇ picker); colors get
+ * a swatch that opens the native picker. Text commits on Enter/blur (one op); arrow keys (±1,
+ * Shift ±10) and scrubbing apply live with a coalesce key, so one gesture is one undo step.
  */
 import {
   formatStyleValue,
@@ -38,7 +41,38 @@ type FieldProps = {
   onApply(prop: StylePropName, value: unknown, meta?: ApplyMeta): boolean;
   /** Live preview on the canvas while scrubbing; null clears it. */
   onPreview?(prop: StylePropName, value: unknown): void;
+  /** Shorter label than the prop's own (e.g. "W" in a two-column grid). */
+  label?: string;
+  /**
+   * Computed size in px, shown as the placeholder when the value is a keyword (hug/fill/auto) or
+   * unset, so Width/Height always show a number. Typing one sets a fixed size.
+   */
+  computed?: number;
+  /** How to read a bare number typed into the field (e.g. letter-spacing in em). */
+  numberUnit?: string;
 };
+
+/** Props whose bare numbers aren't px (no unit suffix shown). */
+const UNITLESS = new Set<StylePropName>([
+  'opacity',
+  'lineHeight',
+  'flexGrow',
+  'flexShrink',
+  'order',
+  'zIndex',
+  'scale',
+  'aspectRatio',
+  'fontWeight',
+]);
+
+/** The unit shown after a value, in muted text. */
+export function unitFor(prop: StylePropName, value: unknown): string {
+  if (typeof value !== 'number') return '';
+  if (prop === 'rotate') return '°';
+  return UNITLESS.has(prop) ? '' : 'px';
+}
+
+const KEYWORD_SIZES = new Set(['hug', 'fill', 'auto']);
 
 /**
  * Inspector rows re-render only when their own prop's state changes (Story 3.10): the inspector
@@ -55,6 +89,9 @@ function sameField(a: FieldProps, b: FieldProps): boolean {
     a.tokens === b.tokens &&
     a.onApply === b.onApply &&
     a.onPreview === b.onPreview &&
+    a.label === b.label &&
+    a.computed === b.computed &&
+    a.numberUnit === b.numberUnit &&
     a.state.from === b.state.from &&
     a.state.setHere === b.state.setHere &&
     a.state.inherited === b.state.inherited &&
@@ -75,6 +112,9 @@ export const StyleField = memo(function StyleField({
   readOnly,
   onApply,
   onPreview,
+  label,
+  computed,
+  numberUnit,
 }: FieldProps) {
   const def = STYLE_PROPS[prop];
   const id = useId();
@@ -89,9 +129,24 @@ export const StyleField = memo(function StyleField({
     ? String(resolvedToken?.resolved ?? (typeof state.value === 'string' ? state.value : ''))
     : '';
 
+  const keywordSize =
+    computed !== undefined && (state.value == null || KEYWORD_SIZES.has(String(state.value)));
+  /** Value nudges and scrubs start from: the computed size for hug/fill, 0 in the field's unit. */
+  const numericBase =
+    keywordSize && computed !== undefined
+      ? Math.round(computed)
+      : state.value == null && numberUnit
+        ? `0${numberUnit}`
+        : state.value;
+  const step = numberUnit === 'em' ? 0.01 : 1;
+
   const commit = (raw: string) => {
     setDraft(null);
-    const r = parseStyleInput(prop, raw);
+    const typed = raw.trim();
+    const r = parseStyleInput(
+      prop,
+      numberUnit && /^-?(?:\d+\.?\d*|\.\d+)$/.test(typed) ? `${typed}${numberUnit}` : typed,
+    );
     if (!r.ok) return setError(r.error);
     setError(null);
     // Compare against every selected node, not just the first (multi-selection).
@@ -108,7 +163,11 @@ export const StyleField = memo(function StyleField({
       e.currentTarget.blur();
     } else if (numeric && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
       e.preventDefault();
-      const next = nudge(prop, state.value, (e.key === 'ArrowUp' ? 1 : -1) * (e.shiftKey ? 10 : 1));
+      const next = nudge(
+        prop,
+        numericBase,
+        (e.key === 'ArrowUp' ? 1 : -1) * (e.shiftKey ? 10 : 1) * step,
+      );
       if (next !== null) {
         setDraft(null);
         onApply(prop, next, { coalesceKey: `nudge:${prop}:${bp}` });
@@ -118,11 +177,11 @@ export const StyleField = memo(function StyleField({
 
   const onScrub = (e: React.PointerEvent) => {
     if (!numeric || readOnly || e.button !== 0) return;
-    const start = state.value;
+    const start = numericBase;
     let last: unknown = null;
     startGesture(e, {
       onMove: (ev, dx) => {
-        const next = nudge(prop, start, Math.round(dx / 2) * (ev.shiftKey ? 10 : 1));
+        const next = nudge(prop, start, Math.round(dx / 2) * (ev.shiftKey ? 10 : 1) * step);
         if (next === null) return;
         last = next;
         setDraft(formatStyleValue(next));
@@ -140,45 +199,87 @@ export const StyleField = memo(function StyleField({
     });
   };
 
-  const showValue = mixed ? '' : tokenValue ? '' : formatStyleValue(state.value);
+  const showValue =
+    mixed || tokenValue || keywordSize
+      ? ''
+      : numberUnit && typeof state.value === 'string' && state.value.endsWith(numberUnit)
+        ? state.value.slice(0, -numberUnit.length)
+        : formatStyleValue(state.value);
   const keywords = propKeywords(prop);
+  const text = label ?? def.label;
+  const unit =
+    draft === null && !mixed && !tokenValue
+      ? keywordSize
+        ? 'px'
+        : numberUnit && showValue !== formatStyleValue(state.value)
+          ? numberUnit
+          : unitFor(prop, state.value)
+      : '';
+  const hex = /^#[0-9a-f]{6}$/i.test(swatch)
+    ? swatch
+    : /^#[0-9a-f]{3}$/i.test(swatch)
+      ? `#${[...swatch.slice(1)].map((c) => c + c).join('')}`
+      : '#000000';
+  const provenance = anySetHere
+    ? `Set on this layer at ${bp}`
+    : state.inherited
+      ? `Inherited from ${state.from}`
+      : 'Not set';
 
   return (
     <div
       data-prop={prop}
-      className="grid items-center gap-1 px-3 py-0.5 text-xs"
-      style={{ gridTemplateColumns: '84px 1fr auto' }}
+      title={`${def.label} (${prop}) · ${provenance}${numeric && !readOnly ? ' · drag the label to scrub' : ''}`}
+      className={`group relative flex h-7 min-w-0 items-center gap-1 rounded-md border px-2 text-xs ${
+        error ? 'border-danger' : 'border-transparent focus-within:border-accent'
+      } bg-surface-2`}
     >
       <label
         htmlFor={id}
-        className={`truncate ${numeric && !readOnly ? 'cursor-ew-resize' : ''} ${
-          state.setHere ? 'text-text' : 'text-muted'
-        }`}
-        title={`${def.label} (${prop})${numeric ? ' — drag to scrub' : ''}`}
+        className={`flex shrink-0 items-center gap-1 text-muted ${numeric && !readOnly ? 'cursor-ew-resize' : ''}`}
         onPointerDown={onScrub}
       >
-        {def.label}
-      </label>
-      <div className="relative flex min-w-0 items-center gap-1">
-        {swatch && (
+        {anySetHere && (
           <span
-            aria-hidden
+            data-set-dot=""
+            aria-label={`Set at ${bp}`}
+            className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent"
+          />
+        )}
+        {text}
+      </label>
+      <div className="flex min-w-0 flex-1 items-center justify-end gap-1">
+        {isColor && (
+          <label
+            className={`relative shrink-0 ${readOnly || tokenValue ? '' : 'cursor-pointer'}`}
+            title={readOnly ? undefined : 'Pick a color'}
             style={{
-              width: 12,
-              height: 12,
-              flex: 'none',
+              width: 14,
+              height: 14,
               borderRadius: 3,
               border: '1px solid rgba(0,0,0,.15)',
-              background: swatch,
+              background: swatch || 'transparent',
             }}
-          />
+          >
+            {!readOnly && !tokenValue && !mixed && (
+              <input
+                type="color"
+                aria-label={`${text} picker`}
+                value={hex}
+                className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                onChange={(e) =>
+                  onApply(prop, e.target.value, { coalesceKey: `picker:${prop}:${bp}` })
+                }
+              />
+            )}
+          </label>
         )}
         {tokenValue && !mixed ? (
           <button
             id={id}
             type="button"
             disabled={readOnly}
-            className="min-w-0 flex-1 truncate rounded bg-accent/10 px-1.5 py-0.5 text-left text-accent"
+            className="min-w-0 truncate rounded bg-accent/10 px-1.5 text-right text-accent"
             title={`Token ${tokenValue}${resolvedToken ? ` = ${resolvedToken.resolved}` : ''}`}
             onClick={() => setPicking(true)}
           >
@@ -191,8 +292,8 @@ export const StyleField = memo(function StyleField({
             disabled={readOnly}
             value={mixed ? '' : String(state.value ?? '')}
             onChange={(e) => onApply(prop, e.target.value === '' ? null : e.target.value)}
-            className={`min-w-0 flex-1 rounded border border-transparent bg-transparent py-0.5 hover:border-border ${
-              state.inherited ? 'text-muted' : ''
+            className={`min-w-0 flex-1 cursor-pointer bg-transparent text-right outline-none ${
+              state.inherited || state.value === undefined ? 'text-muted' : ''
             }`}
           >
             <option value="">{mixed ? 'Mixed' : '—'}</option>
@@ -211,7 +312,7 @@ export const StyleField = memo(function StyleField({
               title={error ?? undefined}
               disabled={readOnly}
               list={keywords.length ? `${id}-kw` : undefined}
-              placeholder={mixed ? 'Mixed' : '—'}
+              placeholder={mixed ? 'Mixed' : keywordSize ? String(Math.round(computed!)) : '—'}
               value={draft ?? showValue}
               onChange={(e) => {
                 setDraft(e.target.value);
@@ -219,9 +320,9 @@ export const StyleField = memo(function StyleField({
               }}
               onBlur={(e) => draft !== null && commit(e.target.value)}
               onKeyDown={onKeyDown}
-              className={`min-w-0 flex-1 rounded border bg-transparent px-1 py-0.5 outline-none focus:border-accent ${
-                error ? 'border-danger' : 'border-transparent hover:border-border'
-              } ${state.inherited && draft === null ? 'text-muted' : ''}`}
+              className={`w-full min-w-0 flex-1 bg-transparent text-right tabular-nums outline-none placeholder:text-muted ${
+                state.inherited && draft === null ? 'text-muted' : ''
+              }`}
             />
             {keywords.length > 0 && (
               <datalist id={`${id}-kw`}>
@@ -232,60 +333,46 @@ export const StyleField = memo(function StyleField({
             )}
           </>
         )}
+        {unit && <span className="shrink-0 text-muted">{unit}</span>}
         {tokens.length > 0 && !readOnly && (
           <button
             type="button"
             aria-label={`${def.label} token`}
             title="Use a token"
-            className={`rounded px-1 hover:bg-surface-2 ${tokenValue ? 'text-accent' : 'text-muted'}`}
+            className={`shrink-0 rounded px-0.5 ${
+              tokenValue
+                ? 'text-accent'
+                : 'text-muted opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 focus:opacity-100'
+            }`}
             onClick={() => setPicking((p) => !p)}
           >
             ◇
           </button>
         )}
-        {picking && (
-          <TokenPicker
-            tokens={tokens}
-            current={tokenValue}
-            label={def.label}
-            onClose={() => setPicking(false)}
-            onPick={(path) => {
-              setPicking(false);
-              onApply(prop, { token: path });
-            }}
-          />
+        {anySetHere && !readOnly && (
+          <button
+            type="button"
+            aria-label={`Reset ${def.label} at ${bp}`}
+            title={`Reset at ${bp}${state.setAt.length > 1 ? ' (inherit)' : ''}`}
+            className="shrink-0 rounded px-0.5 text-muted opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 hover:text-text focus:opacity-100"
+            onClick={() => onApply(prop, null)}
+          >
+            ×
+          </button>
         )}
       </div>
-      <div
-        className="flex items-center gap-0.5"
-        style={{ minWidth: 44, justifyContent: 'flex-end' }}
-      >
-        {anySetHere ? (
-          <>
-            <span
-              className="rounded bg-accent/10 px-1 text-[10px] text-accent"
-              title={`Set at ${bp}`}
-            >
-              {bp}
-            </span>
-            {!readOnly && (
-              <button
-                type="button"
-                aria-label={`Reset ${def.label} at ${bp}`}
-                title={`Reset at ${bp}${state.setAt.length > 1 ? ' (inherit)' : ''}`}
-                className="rounded px-0.5 text-muted hover:text-text"
-                onClick={() => onApply(prop, null)}
-              >
-                ×
-              </button>
-            )}
-          </>
-        ) : state.inherited ? (
-          <span className="text-[10px] text-muted" title={`Inherited from ${state.from}`}>
-            ↳ {state.from}
-          </span>
-        ) : null}
-      </div>
+      {picking && (
+        <TokenPicker
+          tokens={tokens}
+          current={tokenValue}
+          label={def.label}
+          onClose={() => setPicking(false)}
+          onPick={(path) => {
+            setPicking(false);
+            onApply(prop, { token: path });
+          }}
+        />
+      )}
     </div>
   );
 }, sameField);

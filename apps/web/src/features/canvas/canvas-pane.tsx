@@ -20,12 +20,11 @@ import { fitAll } from './camera-actions';
 import { useCanvas, useCanvasStoreApi } from './canvas-store';
 import { ViewportCtx } from './context';
 import { FrameChrome } from './frame-chrome';
-import { LayersPanel } from './layers-panel';
 import { useEditLockLoop } from './lock';
 import { RegisteredOverlays } from './overlay-api';
 import { GuidesOverlay, ResizeHandles } from './resize-handles';
 import { useSelectionInput } from './selection-input';
-import { DropIndicator, SelectionOverlay } from './selection-overlay';
+import { DropIndicator, InsertBoxOverlay, SelectionOverlay } from './selection-overlay';
 import { isTypingEvent, startGesture } from './gesture';
 import { Minimap } from './minimap';
 import { CanvasMessage } from './canvas-message';
@@ -331,7 +330,7 @@ const UI = {
   ResizeHandles: memo(ResizeHandles),
   FrameChrome: memo(FrameChrome),
   RegisteredOverlays: memo(RegisteredOverlays),
-  LayersPanel: memo(LayersPanel),
+  InsertBoxOverlay: memo(InsertBoxOverlay),
   CanvasToolbar: memo(CanvasToolbar),
   Minimap: memo(Minimap),
   CanvasMessage: memo(CanvasMessage),
@@ -341,8 +340,10 @@ export function CanvasPane() {
   const { designSystem } = useEditor();
   const doc = useDocStore((s) => s.doc);
   const live = useLiveFrames(doc.frames);
+  const canvasApi = useCanvasStoreApi();
   const frameDocs = useFrameDocs(doc);
   const select = useDocStore((s) => s.select);
+  const inserting = useCanvas((s) => s.mode === 'edit' && s.tool !== 'select');
   const viewportRef = useRef<HTMLDivElement>(null);
   useViewport(viewportRef);
   useCameraGestures(viewportRef);
@@ -351,10 +352,12 @@ export function CanvasPane() {
 
   useEffect(() => {
     const el = viewportRef.current!;
-    const clear = () => select({ nodeIds: [], frameId: null });
+    const clear = () => {
+      if (canvasApi.getState().mode === 'edit') select({ nodeIds: [], frameId: null });
+    };
     el.addEventListener('cd-background-click', clear);
     return () => el.removeEventListener('cd-background-click', clear);
-  }, [select]);
+  }, [select, canvasApi]);
 
   return (
     <ViewportCtx.Provider value={viewportRef}>
@@ -370,6 +373,7 @@ export function CanvasPane() {
           touchAction: 'none',
           userSelect: 'none',
           outline: 'none',
+          cursor: inserting ? 'crosshair' : undefined,
         }}
       >
         <World>
@@ -392,9 +396,9 @@ export function CanvasPane() {
           <UI.GuidesOverlay />
           <UI.ResizeHandles />
           <UI.FrameChrome />
+          <UI.InsertBoxOverlay />
           <UI.RegisteredOverlays />
         </div>
-        <UI.LayersPanel />
         <UI.CanvasToolbar />
         <UI.Minimap />
         <UI.CanvasMessage />

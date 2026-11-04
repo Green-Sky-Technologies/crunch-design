@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { canvasStoreFor } from './canvas-store';
-import { CanvasPane, InspectorPane } from './index';
+import { CanvasPane, EditPanel } from './index';
 import { fakeRect, frameRoot, renderEditor } from './test-utils';
 
 const node = (id: string) =>
@@ -19,20 +19,22 @@ async function setup(ids: string[]) {
   const r = renderEditor(
     <>
       <CanvasPane />
-      <InspectorPane />
+      <EditPanel />
     </>,
+    { mode: 'edit' },
   );
   await act(async () => {});
   act(() => r.store().getState().select({ frameId: 'f_desktop001', nodeIds: ids }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Pro' }));
   return { ...r, style: (id = ids[0]!) => r.store().getState().doc.nodes[id]!.style };
 }
 
 describe('one undo step per gesture (finding 7)', () => {
   it('a scrub held still for longer than the coalesce window is still one step', async () => {
     const { style, store } = await setup(['n_herotitle1']);
-    const label = within(
-      document.querySelector<HTMLElement>('[data-prop="letterSpacing"]')!,
-    ).getByText('Letter spacing');
+    const label = within(document.querySelector<HTMLElement>('[data-prop="blur"]')!).getByText(
+      'Blur',
+    );
     fireEvent.pointerDown(label, { button: 0, pointerId: 1, clientX: 0 });
     fireEvent.pointerMove(window, { pointerId: 1, clientX: 10 });
     await act(async () => {
@@ -40,16 +42,16 @@ describe('one undo step per gesture (finding 7)', () => {
     });
     fireEvent.pointerMove(window, { pointerId: 1, clientX: 20 });
     // previewed on the element, not yet in the doc
-    expect(node('n_herotitle1').style.getPropertyValue('letter-spacing')).toBe('10px');
-    expect(style().lg?.letterSpacing).toBeUndefined();
+    expect(node('n_herotitle1').style.getPropertyValue('filter')).toBe('blur(10px)');
+    expect(style().lg?.blur).toBeUndefined();
     fireEvent.pointerUp(window, { pointerId: 1 });
-    expect(style().lg?.letterSpacing).toBe(10);
-    expect(node('n_herotitle1').style.getPropertyValue('letter-spacing')).toBe('');
+    expect(style().lg?.blur).toBe(10);
+    expect(node('n_herotitle1').style.getPropertyValue('filter')).toBe('');
     expect(
       store()
         .getState()
         .undoStack.map((s) => s.label),
-    ).toEqual(['Set letter spacing']);
+    ).toEqual(['Set blur']);
   });
 });
 

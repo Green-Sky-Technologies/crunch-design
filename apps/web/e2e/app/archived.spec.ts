@@ -3,7 +3,6 @@
  * is restored), so the editor must open them read-only instead of accepting edits it can't save.
  */
 import {
-  clickNode,
   createProject,
   expectEditing,
   insertSample,
@@ -34,9 +33,8 @@ test('an archived project opens read-only until it is restored', async ({ as, ru
   await expect(node(page, SAMPLE.headline)).toHaveText(SAMPLE.headlineText);
   await expect(page.getByRole('button', { name: '+ Frame' })).toHaveCount(0);
 
-  // No inline editing, no inspector edits, no comment composer, no agent.
-  await clickNode(page, SAMPLE.headline);
-  await expect(page.locator('[data-prop="letterSpacing"] input')).toBeDisabled();
+  // No Edit mode, no inline editing, no comment composer, no agent.
+  await expect(page.getByRole('radio', { name: 'Edit' })).toHaveCount(0);
   const b = await stableBox(node(page, SAMPLE.headline));
   await page.mouse.dblclick(b.x + 20, b.y + 10);
   await expect(page.locator(`[data-cd-id="${SAMPLE.headline}"][contenteditable]`)).toHaveCount(0);

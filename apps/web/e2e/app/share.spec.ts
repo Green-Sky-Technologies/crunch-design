@@ -26,7 +26,7 @@ test('a public link renders for anonymous visitors until it is revoked', async (
   await editText(editor, SAMPLE.headline, headline);
   await expectSaved(editor);
 
-  await editor.getByRole('button', { name: 'Share' }).click();
+  await editor.getByRole('button', { name: 'Share', exact: true }).click();
   await editor.getByRole('radio', { name: /Anyone with the link/ }).check();
   await editor.getByRole('button', { name: 'Create link' }).click();
   const created = editor.getByRole('status').filter({ hasText: 'Public link created' });

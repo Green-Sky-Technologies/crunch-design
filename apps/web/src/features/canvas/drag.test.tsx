@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { canvasStoreFor } from './canvas-store';
-import { CanvasPane, InspectorPane } from './index';
+import { CanvasPane, EditPanel } from './index';
 import { fakeRect, frameRoot, renderEditor } from './test-utils';
 
 afterEach(cleanup);
@@ -15,9 +15,9 @@ async function setup(role: 'editor' | 'viewer' = 'editor') {
   const r = renderEditor(
     <>
       <CanvasPane />
-      <InspectorPane />
+      <EditPanel />
     </>,
-    { role },
+    { role, mode: 'edit' },
   );
   await act(async () => {});
   act(() => canvasStoreFor(r.store()).getState().setCamera({ x: 0, y: 0, z: 0.5 }));
@@ -114,10 +114,11 @@ describe('drag (Story 3.4)', () => {
     expect(canvasStoreFor(store()).getState().gesture).toBeNull();
   });
 
-  it('the inspector toggle converts at base and restores the pinned width on return to flow', async () => {
+  it('the Position toggle converts at base and restores the pinned width on return to flow', async () => {
     const { n } = await setup();
     fireEvent.pointerDown(node('n_herobody01'), { button: 0, pointerId: 1 });
     fireEvent.pointerUp(window, { pointerId: 1 });
+    fireEvent.click(screen.getByRole('tab', { name: 'Pro' }));
     fireEvent.click(screen.getByRole('radio', { name: 'Absolute' }));
     expect(n('n_herobody01').positioning).toBe('absolute');
     expect(n('n_herobody01').style.base).toMatchObject({ left: 0, top: 0 });
@@ -132,7 +133,7 @@ describe('drag (Story 3.4)', () => {
 describe('breakpoint override scope (Story 3.3/3.5)', () => {
   it('is per frame, and canvas gestures always write the breakpoint the frame renders', async () => {
     const { store, n } = await setup();
-    // pick md in the inspector for the desktop (lg) frame
+    // pick md in the edit panel for the desktop (lg) frame
     act(() =>
       store()
         .getState()

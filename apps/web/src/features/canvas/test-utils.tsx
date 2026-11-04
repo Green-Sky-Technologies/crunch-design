@@ -4,9 +4,10 @@
  */
 import { permissionsFor, type Role } from '@crunch/authz';
 import { applyOps, sampleLandingDoc, starterDesignSystem, type DesignDoc } from '@crunch/doc-model';
-import { render } from '@testing-library/react';
+import { act, render } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { EditorProvider, useDocStoreApi, type DocApi, type DocStore } from '../doc-store';
+import { canvasStoreFor, type EditorMode } from './canvas-store';
 import { setLockApi, type LockApi, type LockState } from './lock';
 
 /** Lock server that always grants the lock (canvas tests that aren't about locking). */
@@ -40,7 +41,13 @@ export function memoryApi(initial: DesignDoc) {
 
 export function renderEditor(
   ui: ReactNode,
-  opts: { role?: Role; doc?: DesignDoc; userId?: string } = {},
+  opts: {
+    role?: Role;
+    doc?: DesignDoc;
+    userId?: string;
+    /** Editor mode to start in (the canvas only selects and edits in 'edit'). Default 'view'. */
+    mode?: EditorMode;
+  } = {},
 ) {
   const role = opts.role ?? 'editor';
   const mem = memoryApi(opts.doc ?? sampleLandingDoc());
@@ -67,7 +74,14 @@ export function renderEditor(
       {ui}
     </EditorProvider>,
   );
-  return { ...utils, ...mem, store: () => store };
+  const mode = opts.mode;
+  if (mode && mode !== 'view') act(() => canvasStoreFor(store).getState().setMode(mode));
+  return {
+    ...utils,
+    ...mem,
+    store: () => store,
+    canvas: () => canvasStoreFor(store),
+  };
 }
 
 /** Give an element a fixed client rect (happy-dom has no layout). */

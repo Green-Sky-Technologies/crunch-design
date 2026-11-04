@@ -81,6 +81,11 @@ export interface LockController {
   decline(): Promise<void>;
   handOver(): Promise<void>;
   takeOver(): Promise<void>;
+  /**
+   * Re-check the lock now (entering edit mode): takes it if it's free; if someone else holds it
+   * the doc store goes read-only ('locked') and the UI shows who.
+   */
+  refresh(): Promise<void>;
 }
 
 const controllers = new WeakMap<DocStore, LockController>();
@@ -155,6 +160,9 @@ function controllerFor(docStore: DocStore, projectId: string, canEdit: boolean):
       if (st) await sync(st);
     }),
     takeOver: guard(async () => sync(await lockApi.takeOver(projectId, sid()))),
+    refresh: guard(async () => {
+      if (canEdit) await sync(await lockApi.heartbeat(projectId, sid()));
+    }),
   };
   controllers.set(docStore, c);
   // Expose the internal steps to the hook below.

@@ -1,4 +1,7 @@
 /** Browser client for the agent API. Types mirror the server's MessageView (no server imports). */
+import type { AnswerQuestionsInput, QuestionAnswers, QuestionSet } from '@crunch/agent/questions';
+
+export type { QuestionAnswer, QuestionAnswers, QuestionSet } from '@crunch/agent/questions';
 
 export type MessageStatus = 'pending' | 'streaming' | 'complete' | 'error' | 'cancelled';
 
@@ -33,6 +36,13 @@ export interface MessageView {
   touched: string[];
   txnIds: string[];
   jobSuggestion: JobSuggestion | null;
+  /** Follow-up questions this reply asked (the form), and what the user did with them. */
+  questions?: QuestionSet | null;
+  answers?: QuestionAnswers | null;
+  /** User messages that answer an earlier reply's questions (shown in that reply's card). */
+  answersFor?: string | null;
+  /** The job message this reply started on its own. */
+  startedJobMessageId?: string | null;
   context?: { selection?: string[]; frameId?: string | null; scopeNodeId?: string } | null;
   jobId: string | null;
   snapshotVersionId: string | null;
@@ -117,6 +127,8 @@ export const agentApi = {
       json<{ conversationId: string | null; messages: MessageView[] }>(r),
     ),
   send: (body: SendBody) => post('/api/agent/messages', body).then((r) => json<SendResult>(r)),
+  answer: (messageId: string, body: AnswerQuestionsInput) =>
+    post(`/api/agent/messages/${messageId}/answer`, body).then((r) => json<SendResult>(r)),
   cancel: (messageId: string) =>
     post(`/api/agent/messages/${messageId}/cancel`).then((r) => json<MessageView>(r)),
   startJob: (body: StartJobBody) =>

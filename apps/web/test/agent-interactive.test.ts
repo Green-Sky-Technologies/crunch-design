@@ -113,19 +113,23 @@ describe('interactive agent', () => {
     ]);
   });
 
-  it('offers a generation job for big requests without calling the model', async () => {
+  it('sends new-design requests to the model, reminding it to ask questions first', async () => {
     const { editor, project } = await setup();
+    const client = scriptedClient([{ content: [textBlock('A few questions first.')] }]);
     const sent = await sendMessage(db, editor, {
       projectId: project.id,
       prompt: 'Design a pricing page',
     });
-    expect(sent.needsRun).toBe(false);
-    const chat = await getProjectChat(db, editor, project.id);
-    expect(chat.messages[1]).toMatchObject({
-      status: 'complete',
-      jobSuggestion: { kind: 'generate', prompt: 'Design a pricing page' },
-    });
-    expect(await db.select().from(llmCalls)).toHaveLength(0);
+    expect(sent.needsRun).toBe(true);
+    await runAssistantMessage(db, editor, sent.messageId, { proxy: proxyWith(client) });
+    const last = JSON.stringify(client.calls[0]!.messages.at(-1));
+    expect(last).toContain('ask_questions before anything else');
+    // The reminder is per request, not stored in the conversation.
+    const [row] = await db
+      .select()
+      .from(agentMessages)
+      .where(eq(agentMessages.id, sent.userMessageId));
+    expect(JSON.stringify(row!.content)).not.toContain('ask_questions');
   });
 
   it('keeps viewers out and enforces the allowed model list', async () => {

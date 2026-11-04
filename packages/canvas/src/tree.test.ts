@@ -4,11 +4,14 @@ import {
   ancestors,
   firstChild,
   isLocked,
+  layerName,
   layerRows,
   nodeLabel,
+  nodeTag,
   parentOf,
   selectableAt,
   sibling,
+  textPreview,
   toggleSelection,
   topLevelSelection,
 } from './tree';
@@ -65,5 +68,55 @@ describe('tree navigation', () => {
     expect(rows.some((r) => r.id === 'n_feat1card00')).toBe(false);
     expect(nodeLabel(doc.nodes['n_feat1title0']!)).toBe('Live HTML frames');
     expect(nodeLabel(doc.nodes['n_herocta001']!)).toBe('CTA');
+  });
+});
+
+describe('layer names (edit panel tree)', () => {
+  const box = (style: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+    ({
+      id: 'n_x00000001',
+      type: 'box',
+      tag: 'div',
+      parentId: null,
+      children: [],
+      positioning: 'flow',
+      props: {},
+      style,
+      ...extra,
+    }) as unknown as Parameters<typeof layerName>[0];
+
+  it('names boxes by the layout they establish, before their name', () => {
+    expect(layerName(box({ base: { display: 'flex' } }))).toBe('Row'); // CSS default direction
+    expect(layerName(box({ base: { display: 'flex', flexDirection: 'column' } }))).toBe('Column');
+    expect(layerName(box({ base: { display: 'inline-flex', flexDirection: 'row-reverse' } }))).toBe(
+      'Row',
+    );
+    expect(layerName(box({ base: { display: 'grid' } }, { name: 'Cards' }))).toBe('Grid');
+    // the widest breakpoint's layout wins (that's what desktop frames show)
+    expect(
+      layerName(
+        box({ base: { display: 'flex', flexDirection: 'column' }, lg: { flexDirection: 'row' } }),
+      ),
+    ).toBe('Row');
+  });
+
+  it('falls back to the name, then the capitalised tag', () => {
+    expect(layerName(box({}, { name: 'Hero' }))).toBe('Hero');
+    expect(layerName(box({}, { tag: 'header' }))).toBe('Header');
+    expect(layerName(box({}, { tag: 'a' }))).toBe('Link');
+    expect(layerName(box({}))).toBe('Box');
+    expect(layerName(doc.nodes['n_feat2title0']!)).toBe('Heading');
+    expect(layerName(doc.nodes['n_feat2body00']!)).toBe('Paragraph');
+    expect(layerName(doc.nodes['n_herotitle1']!)).toBe('Headline');
+    expect(layerName(doc.nodes['n_root000001']!)).toBe('Column');
+    expect(layerName(doc.nodes['n_features01']!)).toBe('Grid');
+  });
+
+  it('shows tags and quoted, truncated text previews', () => {
+    expect(nodeTag(doc.nodes['n_herotitle1']!)).toBe('h1');
+    expect(nodeTag(doc.nodes['n_herocta001']!)).toBe('component');
+    expect(textPreview(doc.nodes['n_feat2title0']!)).toBe('“Your design system”');
+    expect(textPreview(doc.nodes['n_herobody01']!, 12)).toMatch(/^“.{11}…”$/);
+    expect(textPreview(doc.nodes['n_hero000001']!)).toBe('');
   });
 });

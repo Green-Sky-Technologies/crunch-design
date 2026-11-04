@@ -6,9 +6,35 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useDocStoreApi } from '../doc-store';
-import { agentApi, followMessage, type Attachment, type MessageView, type SendBody } from './api';
+import {
+  agentApi,
+  followMessage,
+  type Attachment,
+  type MessageView,
+  type QuestionAnswer,
+  type SendBody,
+  type SendResult,
+} from './api';
 
 const ACTIVE = new Set(['pending', 'streaming']);
+
+export interface AnswerBody {
+  skip?: boolean;
+  answers: QuestionAnswer[];
+  model?: string;
+}
+
+/**
+ * Mounted chats, so a questions card can answer through the chat that shows it (and the chat
+ * follows the reply) without threading a callback through the pane.
+ */
+const mounted = new Set<{ has(messageId: string): boolean; answer: AgentChat['answer'] }>();
+
+/** Answer the questions on `messageId` through the chat that holds it. */
+export async function answerQuestions(messageId: string, body: AnswerBody): Promise<void> {
+  for (const c of mounted) if (c.has(messageId)) return c.answer(messageId, body);
+  await agentApi.answer(messageId, body);
+}
 
 export interface AgentChat {
   messages: MessageView[];
@@ -26,6 +52,8 @@ export interface AgentChat {
       frameId?: string | null;
     },
   ): Promise<void>;
+  /** Answer (or skip) the follow-up questions an assistant message asked; the agent continues. */
+  answer(messageId: string, body: AnswerBody): Promise<void>;
   cancel(messageId: string): Promise<void>;
   retry(assistantMessageId: string): Promise<void>;
   /** Replace one message (e.g. after a job starts). */
@@ -46,6 +74,9 @@ export function useAgentChat(projectId: string, load: boolean, enabled: boolean)
   const [loading, setLoading] = useState(load);
   const [error, setError] = useState<string | null>(null);
   const followers = useRef(new Map<string, () => void>());
+  /** Jobs a reply started on its own, already being followed. */
+  const startedJobs = useRef(new Set<string>());
+  const followRef = useRef<(messageId: string) => void>(() => {});
 
   const upsert = useCallback((view: MessageView) => {
     setMessages((prev) => {
@@ -63,6 +94,12 @@ export function useAgentChat(projectId: string, load: boolean, enabled: boolean)
       let seenTxns = 0;
       const f = followMessage(`/api/agent/messages/${messageId}/stream`, (view) => {
         upsert(view);
+        // A reply to answered questions can start its generation job; show and follow it.
+        const jobMessageId = view.startedJobMessageId;
+        if (jobMessageId && !startedJobs.current.has(jobMessageId)) {
+          startedJobs.current.add(jobMessageId);
+          followRef.current(jobMessageId);
+        }
         if (view.txnIds.length > seenTxns) {
           seenTxns = view.txnIds.length;
           void store
@@ -82,6 +119,9 @@ export function useAgentChat(projectId: string, load: boolean, enabled: boolean)
     },
     [store, upsert],
   );
+  useEffect(() => {
+    followRef.current = follow;
+  }, [follow]);
 
   useEffect(() => {
     if (!load) return;
@@ -122,27 +162,16 @@ export function useAgentChat(projectId: string, load: boolean, enabled: boolean)
       try {
         const res = await agentApi.send(body);
         setConversationId(res.conversationId);
-        const now = new Date().toISOString();
         const seqBase = messages.at(-1)?.seq ?? 0;
-        const placeholder = (over: Partial<MessageView>): MessageView => ({
-          id: '',
-          conversationId: res.conversationId,
-          seq: 0,
-          role: 'user',
-          status: 'complete',
-          model: null,
-          text: '',
-          activity: [],
-          touched: [],
-          txnIds: [],
-          jobSuggestion: null,
-          jobId: null,
-          snapshotVersionId: null,
-          attachments: [],
-          error: null,
-          createdAt: now,
-          ...over,
-        });
+        const placeholder = placeholderFor(res);
+        // Unanswered questions are superseded by the new message (the server records it).
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.questions && !m.answers
+              ? { ...m, answers: { outcome: 'superseded', answers: [] } }
+              : m,
+          ),
+        );
         upsert(
           placeholder({
             id: res.userMessageId,
@@ -166,6 +195,60 @@ export function useAgentChat(projectId: string, load: boolean, enabled: boolean)
     },
     [conversationId, follow, messages, projectId, store, upsert],
   );
+
+  const answer = useCallback<AgentChat['answer']>(
+    async (messageId, body) => {
+      setError(null);
+      // Errors propagate to the questions card, which shows them next to the form.
+      const res = await agentApi.answer(messageId, body);
+      const seqBase = messages.at(-1)?.seq ?? 0;
+      const placeholder = placeholderFor(res);
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === messageId
+            ? {
+                ...m,
+                answers: {
+                  outcome: body.skip ? 'skipped' : 'answered',
+                  answers: body.skip ? [] : body.answers,
+                },
+              }
+            : m,
+        ),
+      );
+      upsert(
+        placeholder({
+          id: res.userMessageId,
+          seq: seqBase + 1,
+          answersFor: messageId,
+        }),
+      );
+      upsert(
+        placeholder({ id: res.messageId, seq: seqBase + 2, role: 'assistant', status: 'pending' }),
+      );
+      follow(res.messageId);
+    },
+    [follow, messages, upsert],
+  );
+
+  // Register for answerQuestions() (the questions card).
+  const messagesRef = useRef(messages);
+  const answerRef = useRef(answer);
+  useEffect(() => {
+    messagesRef.current = messages;
+    answerRef.current = answer;
+  }, [messages, answer]);
+  useEffect(() => {
+    if (!enabled) return;
+    const entry = {
+      has: (id: string) => messagesRef.current.some((m) => m.id === id),
+      answer: (id: string, body: AnswerBody) => answerRef.current(id, body),
+    };
+    mounted.add(entry);
+    return () => {
+      mounted.delete(entry);
+    };
+  }, [enabled]);
 
   const cancel = useCallback(
     async (messageId: string) => {
@@ -205,6 +288,7 @@ export function useAgentChat(projectId: string, load: boolean, enabled: boolean)
     // A background job doesn't block the composer: its card has its own progress and Cancel.
     busy: messages.some((m) => ACTIVE.has(m.status) && !m.jobId),
     send,
+    answer,
     cancel,
     retry,
     upsert,
@@ -215,4 +299,28 @@ export function useAgentChat(projectId: string, load: boolean, enabled: boolean)
     },
     dismissError: () => setError(null),
   };
+}
+
+/** Optimistic message shown until the stream sends the real one. */
+function placeholderFor(res: SendResult) {
+  const now = new Date().toISOString();
+  return (over: Partial<MessageView>): MessageView => ({
+    id: '',
+    conversationId: res.conversationId,
+    seq: 0,
+    role: 'user',
+    status: 'complete',
+    model: null,
+    text: '',
+    activity: [],
+    touched: [],
+    txnIds: [],
+    jobSuggestion: null,
+    jobId: null,
+    snapshotVersionId: null,
+    attachments: [],
+    error: null,
+    createdAt: now,
+    ...over,
+  });
 }

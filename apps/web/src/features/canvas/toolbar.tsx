@@ -1,6 +1,9 @@
 'use client';
 
-/** Canvas toolbar: add frame, zoom controls, fit, and the empty-project sample helper. */
+/**
+ * Canvas toolbar: zoom controls and fit everywhere; add frame in edit mode; and the
+ * empty-project sample helper for editors.
+ */
 import { addFrameOps, centerOn, FRAME_PRESETS, stepZoom, zoomAt } from '@crunch/canvas';
 import { replaceDocOps, sampleLandingDoc } from '@crunch/doc-model';
 import { useState } from 'react';
@@ -13,7 +16,7 @@ export function CanvasToolbar() {
   const readOnly = useDocStore((s) => s.readOnly);
   const isEmpty = useDocStore((s) => Object.keys(s.doc.nodes).length <= s.doc.frames.length);
   const zoom = useCanvas((s) => s.camera.z);
-  const layersOpen = useCanvas((s) => s.layersOpen);
+  const editMode = useCanvas((s) => s.mode === 'edit');
   const docStore = useDocStoreApi();
   const canvas = useCanvasStoreApi();
   const [menu, setMenu] = useState(false);
@@ -57,15 +60,7 @@ export function CanvasToolbar() {
         }}
         onPointerDown={(e) => e.stopPropagation()}
       >
-        <button
-          type="button"
-          className={`rounded px-2 py-1 hover:bg-surface-2 ${layersOpen ? 'text-accent' : ''}`}
-          aria-pressed={layersOpen}
-          onClick={() => canvas.getState().toggleLayers()}
-        >
-          Layers
-        </button>
-        {editable && (
+        {editable && editMode && (
           <div style={{ position: 'relative' }}>
             <button
               type="button"

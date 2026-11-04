@@ -112,9 +112,10 @@ test.describe('canvas performance budget', () => {
     await page.evaluate(() =>
       window.__cd.store.getState().select({ frameId: 'f_bench00000', nodeIds: ['n_b000000005'] }),
     );
-    await page.locator('[data-prop="letterSpacing"] input').waitFor();
+    await page.getByRole('tab', { name: 'Pro' }).click();
+    await page.locator('[data-prop="blur"] input').waitFor();
     const ms = await page.evaluate(async () => {
-      const input = document.querySelector<HTMLInputElement>('[data-prop="letterSpacing"] input')!;
+      const input = document.querySelector<HTMLInputElement>('[data-prop="blur"] input')!;
       const host = document.querySelector('[data-cd-frame-host="f_bench00000"]')!;
       const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
       const macrotask = () =>
@@ -137,8 +138,7 @@ test.describe('canvas performance budget', () => {
         samples.push(performance.now() - t0);
       }
       samples.sort((a, b) => a - b);
-      const applied =
-        window.__cd.store.getState().doc.nodes['n_b000000005']!.style.lg?.letterSpacing;
+      const applied = window.__cd.store.getState().doc.nodes['n_b000000005']!.style.lg?.blur;
       return { median: samples[10]!, p95: samples[18]!, max: samples[19]!, applied };
     });
     console.log(

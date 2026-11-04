@@ -150,18 +150,32 @@ so pricing can be decided later.
 
 ## 4. Interaction Model
 
-**Layout:** conversation panel (left) · canvas (center) · inspector (right,
-contextual). Top bar: project and frame navigation, breakpoint switcher, share,
-export, presence avatars, edit-lock status.
+**Layout:** a left pane and the canvas (full width; no right-hand inspector). A slim top
+bar carries the project, edit-lock status, a **View / Edit / Comment** mode switch, comments,
+versions, activity, share, notifications and export. The editor is full-screen (no workspace
+header).
 
-**Four refinement modes:**
-1. **Chat:** broad changes ("darker scheme", "show 3 alt layouts").
-2. **Inline comments:** pin a comment to an element. Either a human comment thread
-   or "Ask agent" for a targeted, surgical change to that node.
-3. **Direct edits:** select, drag, resize, edit text, and edit any style prop in
-   the inspector. Flow-first drag with absolute positioning as an opt-in.
-4. **Sliders:** agent-generated controls bound to props or tokens, applied live
-   at zero token cost.
+**Modes** (so you never edit by accident):
+- **View** (default): the canvas is a preview. Pan and zoom only; clicks never select. The left
+  pane is the agent chat.
+- **Edit** (E): select, drag, resize, edit text and insert elements. The left pane turns into the
+  edit panel: Discard / Save for the edit session; Simple · Pro · Code · Tweaks tabs; a layer
+  tree with semantic names (Row, Column, Grid, Heading…); a Figma-style tool row (select, text,
+  frame, rectangle, ellipse, line, image, undo/redo); and grouped property sections (Text,
+  Sizing with Hug / Fixed / Fill, Layout, Fill, Stroke, Radius, Effects), with a marker on
+  values set at the current breakpoint. Viewers and archived projects can't enter it.
+- **Comment** (C): click an element to open a composer with two actions. **Comment** posts a
+  human comment thread; the comments pane (a running log of human threads) slides over the left
+  pane. **Send to agent** posts the text into the open agent chat with the element as the turn's
+  context, through the normal chat path.
+
+**Follow-up questions:** before generating a new design or page, and for ambiguous or large
+chat requests, the agent asks follow-up questions in a form card (multiple choice and free
+text, or "just decide"). The answers feed into the design. Small tweaks run without asking.
+
+**Refinement:** chat; comments sent to the agent; direct edits in Edit mode (flow-first
+drag, absolute positioning as an opt-in); and sliders (agent-generated controls bound to props
+or tokens, applied live at zero token cost; the Tweaks tab).
 
 **Concurrency:** async teams with a **soft lock**. One Editor holds the edit lock
 per project; others view and comment and can request control. The agent acts only
@@ -372,9 +386,10 @@ job; "make this button larger" via an inline comment patches one node.*
 - **5.6 Chat panel.** Conversation per project, streaming, tool-activity
   indicators, cancel, retry, and job cards with progress. AC: messages persist; the
   attachments are images, a URL to capture, or a Figma frame link.
-- **5.7 Inline "ask agent" comments.** Pin a comment to a node and ask the agent.
-  The request carries that node's subtree and design-system context only. AC: the
-  resulting patch is scoped to that subtree unless the user approves a wider change.
+- **5.7 Send a comment to the agent.** In Comment mode, "Send to agent" posts the comment into
+  the open chat with the element as selection context (same Messages API path as chat). The
+  older pinned "ask agent" thread flow (`/api/agent/edit`, subtree-scoped patches) is retired
+  from the UI; existing agent-request threads still display.
 - **5.8 Sliders.** The agent proposes sliders bound to props or tokens (e.g.
   "density" controls padding and gap). They render in a slider tray; dragging applies
   ops locally (zero tokens); sliders can be pinned, renamed and deleted. AC: slider

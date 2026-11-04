@@ -33,7 +33,7 @@ export async function openProject(page: Page, slug: string, projectId: string) {
 }
 
 export async function expectEditorReady(page: Page) {
-  await expect(page.getByRole('link', { name: '← Projects' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'All projects' })).toBeVisible();
   await expect(page.getByTestId('edit-lock')).toBeVisible();
 }
 
@@ -87,8 +87,16 @@ export async function clickNode(page: Page, id: string) {
   await page.mouse.click(b.x + Math.min(b.width / 2, 40), b.y + Math.min(b.height / 2, 12));
 }
 
-/** Double-click a text node, replace its text and commit with Enter. */
+/** Switch the editor to a mode (View / Edit / Comment) with the top-bar switch. */
+export async function setMode(page: Page, mode: 'View' | 'Edit' | 'Comment') {
+  const radio = page.getByRole('radio', { name: mode });
+  if ((await radio.getAttribute('aria-checked')) !== 'true') await radio.click();
+  await expect(radio).toHaveAttribute('aria-checked', 'true');
+}
+
+/** Double-click a text node (in Edit mode), replace its text and commit with Enter. */
 export async function editText(page: Page, id: string, text: string) {
+  await setMode(page, 'Edit');
   const b = await stableBox(node(page, id));
   await page.mouse.dblclick(b.x + Math.min(b.width / 2, 40), b.y + Math.min(b.height / 2, 12));
   await expect(page.locator(`[data-cd-id="${id}"][contenteditable]`)).toHaveCount(1);

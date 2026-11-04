@@ -130,3 +130,60 @@ export function layerRows(
   visit(rootId, 0);
   return rows;
 }
+
+const TAG_NAMES: Record<string, string> = {
+  a: 'Link',
+  p: 'Paragraph',
+  span: 'Text',
+  h1: 'Heading',
+  h2: 'Heading',
+  h3: 'Heading',
+  h4: 'Heading',
+  h5: 'Heading',
+  h6: 'Heading',
+  div: 'Box',
+  ul: 'List',
+  ol: 'List',
+  li: 'List item',
+  nav: 'Nav',
+  blockquote: 'Quote',
+  em: 'Emphasis',
+  img: 'Image',
+  svg: 'Vector',
+};
+
+/** The HTML tag a node renders as (instances show as `component`). */
+export function nodeTag(n: Node): string {
+  if (n.type === 'box' || n.type === 'text') return n.tag;
+  if (n.type === 'image') return 'img';
+  if (n.type === 'svg') return 'svg';
+  return 'component';
+}
+
+/**
+ * Semantic layer name for the edit panel's tree: the layout a box establishes (flex row → "Row",
+ * flex column → "Column", grid → "Grid"), else the node's own name, else its tag, capitalised
+ * ("Header", "Link", "Heading"). Instances use their component's name when it's known.
+ */
+export function layerName(n: Node, componentName?: string): string {
+  if (n.type === 'box') {
+    const s = n.style;
+    const display = s.lg?.display ?? s.md?.display ?? s.base?.display;
+    const dir = s.lg?.flexDirection ?? s.md?.flexDirection ?? s.base?.flexDirection;
+    if (display === 'grid') return 'Grid';
+    if (display === 'flex' || display === 'inline-flex')
+      return dir === 'column' || dir === 'column-reverse' ? 'Column' : 'Row';
+  }
+  if (n.name) return n.name;
+  if (n.type === 'instance') return componentName ?? n.componentRef.componentId;
+  const tag = nodeTag(n);
+  return TAG_NAMES[tag] ?? tag.charAt(0).toUpperCase() + tag.slice(1);
+}
+
+/** Quoted, single-line, truncated preview of a text node's content ('' for other nodes). */
+export function textPreview(n: Node, max = 40): string {
+  if (n.type !== 'text') return '';
+  const t = n.props.text.trim().replace(/\s+/g, ' ');
+  if (!t) return '';
+  return `“${t.length > max ? `${t.slice(0, max - 1)}…` : t}”`;
+}

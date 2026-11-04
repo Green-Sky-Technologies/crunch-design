@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
 import { registerOverlay, type OverlayApi } from '@crunch/contracts/canvas-overlay';
-import { act, cleanup, fireEvent, screen, within } from '@testing-library/react';
+import { act, cleanup, createEvent, fireEvent, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { canvasStoreFor } from './canvas-store';
-import { CanvasPane } from './index';
+import { CanvasPane, EditPanel } from './index';
 import { fakeRect, frameRoot, renderEditor } from './test-utils';
 
 afterEach(cleanup);
@@ -18,7 +18,13 @@ const press = (el: HTMLElement, shiftKey = false) => {
 const nextFrame = () => act(() => new Promise<void>((r) => requestAnimationFrame(() => r())));
 
 async function setup(role: 'editor' | 'viewer' = 'editor') {
-  const r = renderEditor(<CanvasPane />, { role });
+  const r = renderEditor(
+    <>
+      <CanvasPane />
+      <EditPanel />
+    </>,
+    { role, mode: 'edit' },
+  );
   await act(async () => {});
   return { ...r, sel: () => r.store().getState().selection };
 }
@@ -64,12 +70,14 @@ describe('selection (Story 3.2)', () => {
     expect(store().getState().doc.nodes['n_herobody01']).toBeDefined();
   });
 
-  it('viewers can select and navigate but not delete', async () => {
-    const { sel, store } = await setup('viewer');
+  it('viewers can’t enter edit mode, so the canvas never selects or deletes', async () => {
+    const { sel, store, canvas } = await setup('viewer');
+    expect(canvas().getState().mode).toBe('view');
     press(node('n_herobody01'));
-    expect(sel().nodeIds).toEqual(['n_herobody01']);
+    expect(sel().nodeIds).toEqual([]);
     fireEvent.keyDown(window, { key: 'Delete' });
     expect(store().getState().doc.nodes['n_herobody01']).toBeDefined();
+    expect(screen.getByTestId('edit-panel').textContent).toMatch(/view access/);
   });
 
   it('draws outlines at the node rect projected by the camera', async () => {
@@ -89,23 +97,50 @@ describe('selection (Story 3.2)', () => {
     expect([box.style.left, box.style.top, box.style.width]).toEqual(['50px', '100px', '40px']);
   });
 
-  it('the layers panel mirrors the tree, selects, reveals the selection and hides layers', async () => {
+  it('the layer tree mirrors the tree, selects, reveals the selection and hides layers', async () => {
     const { sel, store } = await setup();
     const tree = screen.getByRole('tree', { name: 'Landing — Desktop layers' });
-    // root expanded by default: its children are listed
-    expect(within(tree).getByRole('button', { name: 'Hero' })).toBeTruthy();
-    expect(within(tree).queryByRole('button', { name: 'Headline' })).toBeNull();
-    fireEvent.click(within(tree).getByRole('button', { name: 'Hero' }));
+    // root expanded by default: its children are listed with semantic names
+    const hero = within(tree).getByRole('button', { name: 'Column Hero' });
+    expect(within(tree).queryByRole('button', { name: /^Headline/ })).toBeNull();
+    // the tag is shown right-aligned
+    expect(hero.closest('li')!.textContent).toContain('section');
+    fireEvent.click(hero);
     expect(sel().nodeIds).toEqual(['n_hero000001']);
-    // selecting on the canvas expands the ancestors in the panel
+    // selecting on the canvas expands the ancestors in the tree
     press(node('n_feat2title0'));
-    const row = within(tree).getByRole('button', { name: 'Your design system' });
+    const row = within(tree).getByRole('button', { name: 'Heading “Your design system”' });
     expect(row.closest('li')!.getAttribute('aria-selected')).toBe('true');
+    // hovering a row highlights the node on the canvas
+    fireEvent.pointerEnter(row.closest('li')!);
+    expect(canvasStoreFor(store()).getState().hover).toEqual({
+      frameId: FRAME,
+      nodeId: 'n_feat2title0',
+    });
     press(node('n_herotitle1'));
     fireEvent.click(within(tree).getByRole('button', { name: 'Hide Headline' }));
     expect(store().getState().doc.nodes['n_herotitle1']!.hidden).toBe(true);
-    fireEvent.click(screen.getByRole('button', { name: 'Layers' }));
-    expect(screen.queryByRole('tree')).toBeNull();
+    // no floating layers panel on the canvas any more
+    expect(within(screen.getByTestId('canvas')).queryByRole('tree')).toBeNull();
+  });
+
+  it('drags a layer row to reorder it (one moveNode op)', async () => {
+    const { store } = await setup();
+    const tree = screen.getByRole('tree', { name: 'Landing — Desktop layers' });
+    const features = within(tree).getByRole('button', { name: 'Grid Features' }).closest('li')!;
+    const nav = within(tree).getByRole('button', { name: 'Row Nav' }).closest('li')!;
+    fakeRect(nav, { x: 0, y: 0, width: 300, height: 28 });
+    fireEvent.dragStart(features);
+    const over = createEvent.dragOver(nav);
+    Object.defineProperty(over, 'clientY', { value: 2 }); // top quarter: before Nav
+    fireEvent(nav, over);
+    fireEvent.drop(nav);
+    expect(store().getState().doc.nodes['n_root000001']!.children[0]).toBe('n_features01');
+    expect(
+      store()
+        .getState()
+        .undoStack.map((u) => u.label),
+    ).toEqual(['Move layer']);
   });
 });
 

@@ -8,6 +8,7 @@ import { agentApi, type JobSuggestion } from './api';
 import { Composer } from './composer';
 import { JobCard, JobSuggestionCard } from './job-card';
 import { MessageItem } from './message-item';
+import { outboxPrompt, useAgentOutbox } from './outbox';
 import { ModelPicker, useAgentSettings } from './model-picker';
 import { RevertButton } from './revert-button';
 import { SliderTray } from './slider-tray';
@@ -39,6 +40,22 @@ export function AgentPane() {
     }
   };
 
+  // "Send to agent" from a canvas comment: post it into this conversation, with the element as
+  // the turn's selection context, one at a time.
+  const queued = useAgentOutbox((s) => s.queue.length);
+  const take = useAgentOutbox((s) => s.take);
+  const { busy, send } = chat;
+  useEffect(() => {
+    if (!queued || busy || !live) return;
+    const item = take();
+    if (item)
+      void send(outboxPrompt(item), {
+        selection: [item.nodeId],
+        frameId: item.frameId,
+        model: model || undefined,
+      });
+  }, [queued, busy, live, take, send, model]);
+
   useEffect(() => {
     endRef.current?.scrollIntoView?.({ block: 'end' });
   }, [chat.messages]);
@@ -67,8 +84,8 @@ export function AgentPane() {
           </p>
         ) : !chat.loading && chat.messages.length === 0 ? (
           <p className="text-muted">
-            Describe a change (“make the hero headline larger”), select an element first to focus
-            the agent, or ask for a new page.
+            Describe a change (“make the hero headline larger”) or ask for a new page. To point at
+            an element, switch to Comment mode, click it and choose Send to agent.
           </p>
         ) : null}
         {chat.messages.map((m) => (

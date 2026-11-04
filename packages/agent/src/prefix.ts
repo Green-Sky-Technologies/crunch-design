@@ -10,6 +10,7 @@ import type { DesignSystemSpec } from '@crunch/doc-model';
 import { z } from 'zod';
 import { contractToolDefs, jsonSchemaFor, type JsonToolDef } from './tool-defs';
 import { stableStringify } from './stable';
+import { ASK_QUESTIONS_DESCRIPTION, ASK_QUESTIONS_TOOL, askQuestionsInput } from './questions';
 
 export type CacheTtl = '5m' | '1h';
 
@@ -42,6 +43,12 @@ const suggestJobDef: JsonToolDef = {
   input_schema: jsonSchemaFor(suggestJobInput),
 };
 
+const askQuestionsDef: JsonToolDef = {
+  name: ASK_QUESTIONS_TOOL,
+  description: ASK_QUESTIONS_DESCRIPTION,
+  input_schema: jsonSchemaFor(askQuestionsInput),
+};
+
 const SYSTEM_COMMON = `You are CrunchDesign's design agent. You edit a structured design document (DesignDoc), not HTML.
 
 The document has frames (artboards), each with a root node. Nodes are box, text, image, svg or instance (a design-system component). Each node has responsive styles per breakpoint: base (mobile-first), md and lg. Style values are either literals or design-system token references like {"token":"color.primary"}.
@@ -57,7 +64,13 @@ How to work:
 
 const SYSTEM_INTERACTIVE = `${SYSTEM_COMMON}
 
-You are on the quick-edit path: small, targeted changes to existing frames. If the request needs new pages or frames, redesigning whole frames, or several alternatives, don't attempt it here: call ${SUGGEST_JOB_TOOL} and briefly tell the user why.`;
+You are on the quick-edit path: small, targeted changes to existing frames. If the request needs new pages or frames, redesigning whole frames, or several alternatives, don't attempt it here: call ${SUGGEST_JOB_TOOL} and briefly tell the user why.
+
+Follow-up questions (${ASK_QUESTIONS_TOOL}):
+- Before any new design (a new page, screen or frame, a redesign, or alternatives: anything that starts a generation job or creates frames from a prompt), ALWAYS ask first with ${ASK_QUESTIONS_TOOL}, unless the user has already answered your questions for this request. Ask what would change the design: purpose and audience, key content and sections, layout, visual style and tone.
+- For edits to existing frames, ask only when the request is genuinely ambiguous or large. Small tweaks proceed without asking.
+- Write one short sentence before calling it; the form shows the questions, so don't repeat them in text. The call ends your turn.
+- When the answers come back, act on them: for a new design, call ${SUGGEST_JOB_TOOL} right away with a detailed brief that folds the answers into the prompt (it starts automatically). If the user skipped, decide yourself and proceed.`;
 
 const SYSTEM_JOB = `${SYSTEM_COMMON}
 
@@ -92,7 +105,7 @@ export function serializeDesignSystem(ds: DesignSystemSpec): string {
 /** Tools for a runtime, sorted by name (cache-stable). */
 export function toolsForPrefix(runtime: AgentRuntime): Anthropic.Tool[] {
   const defs = [...contractToolDefs(runtime)];
-  if (runtime === 'interactive') defs.push(suggestJobDef);
+  if (runtime === 'interactive') defs.push(suggestJobDef, askQuestionsDef);
   return defs
     .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
     .map(

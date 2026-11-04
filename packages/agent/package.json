@@ -4,7 +4,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./sliders": "./src/sliders.ts"
+    "./sliders": "./src/sliders.ts",
+    "./questions": "./src/questions.ts"
   },
   "scripts": {
     "typecheck": "tsc -p .",

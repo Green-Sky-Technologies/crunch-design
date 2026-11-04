@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { canvasStoreFor } from './canvas-store';
-import { CanvasPane, InspectorPane } from './index';
+import { CanvasPane, EditPanel } from './index';
 import { fakeRect, frameRoot, renderEditor } from './test-utils';
 
 afterEach(cleanup);
@@ -15,9 +15,9 @@ async function setup(id = 'n_herocta001', role: 'editor' | 'viewer' = 'editor') 
   const r = renderEditor(
     <>
       <CanvasPane />
-      <InspectorPane />
+      <EditPanel />
     </>,
-    { role },
+    { role, mode: 'edit' },
   );
   await act(async () => {});
   act(() => canvasStoreFor(r.store()).getState().setCamera({ x: 0, y: 0, z: 0.5 }));
@@ -63,22 +63,22 @@ describe('resize (Story 3.5)', () => {
     expect(style().lg).toMatchObject({ width: 'hug', height: 'hug' });
   });
 
-  it('the inspector switches fixed, fill and hug', async () => {
+  it('the edit panel switches fixed, fill and hug', async () => {
     const { style } = await setup('n_herobody01');
     const width = screen.getByRole('radiogroup', { name: 'width sizing' });
-    fireEvent.click(within(width).getByRole('radio', { name: 'fill' }));
+    fireEvent.click(within(width).getByRole('radio', { name: 'Fill' }));
     expect(style().lg?.width).toBe('fill');
-    fireEvent.click(within(width).getByRole('radio', { name: 'hug' }));
+    fireEvent.click(within(width).getByRole('radio', { name: 'Hug' }));
     expect(style().lg?.width).toBe('hug');
-    fireEvent.click(within(width).getByRole('radio', { name: 'fixed' }));
+    fireEvent.click(within(width).getByRole('radio', { name: 'Fixed' }));
     expect(typeof style().lg?.width).toBe('number');
-    expect(within(width).getByRole('radio', { name: 'fixed' }).getAttribute('aria-checked')).toBe(
+    expect(within(width).getByRole('radio', { name: 'Fixed' }).getAttribute('aria-checked')).toBe(
       'true',
     );
   });
 
   it('absolute nodes get all handles and resizing from the west moves left', async () => {
-    const r = renderEditor(<CanvasPane />);
+    const r = renderEditor(<CanvasPane />, { mode: 'edit' });
     await act(async () => {});
     act(() => {
       r.store()

@@ -4,6 +4,7 @@
  */
 import {
   clickNode,
+  setMode,
   createProject,
   insertSample,
   openProject,
@@ -17,12 +18,17 @@ test('an editor pins a comment on an element and a viewer can read it', async ({
   const projectId = await createProject(editor, run.org.slug, uniqueName('Comments'));
   await insertSample(editor);
 
+  // Comment mode: click the element, write, and post it as a human comment.
+  await setMode(editor, 'Comment');
   await clickNode(editor, SAMPLE.headline);
-  await editor.getByRole('button', { name: /^Comments/ }).click();
-  await expect(editor.getByText(/Commenting on .*Headline/)).toBeVisible();
+  const popover = editor.getByRole('dialog', { name: 'Comment on element' });
+  await expect(popover).toBeVisible();
   const body = `Tighten this headline ${Date.now().toString(36)}`;
-  await editor.getByPlaceholder('Add a comment… use @ to mention').fill(body);
-  await editor.getByRole('button', { name: 'Comment', exact: true }).click();
+  await popover.getByRole('textbox').fill(body);
+  await popover.getByRole('button', { name: 'Comment', exact: true }).click();
+  await expect(popover).toHaveCount(0);
+  // The comments pane opens over the chat pane.
+  await expect(editor.getByRole('dialog', { name: 'Comments' })).toBeVisible();
   const thread = editor.locator('[data-thread-id]').filter({ hasText: body });
   await expect(thread).toBeVisible();
   await expect(thread.getByRole('button', { name: /Headline/ })).toBeVisible();

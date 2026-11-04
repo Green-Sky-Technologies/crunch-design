@@ -2,6 +2,8 @@
 
 import type { ReactNode } from 'react';
 import type { MessageView, ToolActivity } from './api';
+import { QuestionsCard } from './questions-card';
+import { answerQuestions } from './use-agent-chat';
 
 const TOOL_LABELS: Record<string, string> = {
   get_outline: 'Reading the outline',
@@ -12,6 +14,7 @@ const TOOL_LABELS: Record<string, string> = {
   get_design_system: 'Checking the design system',
   run_lint: 'Checking against the design system',
   suggest_generation_job: 'Suggesting a background job',
+  ask_questions: 'Asking a few questions',
   screenshot_frame: 'Taking a screenshot',
   capture_url: 'Capturing a page',
   get_figma_frame: 'Fetching from Figma',
@@ -46,6 +49,8 @@ export function MessageItem({
   /** Job card, revert button, etc. */
   extra?: ReactNode;
 }) {
+  // Answers to follow-up questions show in the asking reply's card instead.
+  if (m.role === 'user' && m.answersFor) return null;
   if (m.role === 'user')
     return (
       <div className="ml-6 rounded-lg bg-surface-2 px-3 py-2 text-sm whitespace-pre-wrap">
@@ -76,6 +81,14 @@ export function MessageItem({
             <ActivityChip key={a.id} a={a} />
           ))}
         </ul>
+      )}
+      {m.questions && (
+        <QuestionsCard
+          set={m.questions}
+          answers={m.answers ?? null}
+          canAnswer={canRun && m.status === 'complete'}
+          onSubmit={(body) => answerQuestions(m.id, body)}
+        />
       )}
       {m.status === 'error' && <p className="mt-1 text-xs text-danger">{m.error ?? 'Failed.'}</p>}
       {m.status === 'cancelled' && <p className="mt-1 text-xs text-muted">Cancelled.</p>}

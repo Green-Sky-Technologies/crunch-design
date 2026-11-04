@@ -13,7 +13,7 @@ const node = (id: string) =>
   frameRoot('f_desktop001')!.querySelector<HTMLElement>(`[data-cd-id="${id}"]`)!;
 
 async function setup(role: 'editor' | 'viewer' = 'editor') {
-  const r = renderEditor(<CanvasPane />, { role });
+  const r = renderEditor(<CanvasPane />, { role, mode: 'edit' });
   await act(async () => {});
   return {
     ...r,

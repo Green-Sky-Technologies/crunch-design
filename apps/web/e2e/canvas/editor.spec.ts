@@ -1,6 +1,6 @@
 /**
  * Canvas editor interactions across Chromium, Firefox and WebKit (Story 3.9): select, drag,
- * resize, inspector and inline text editing, plus pan/zoom and read-only modes. Every edit is
+ * resize, edit-panel properties and inline text editing, plus pan/zoom and read-only modes. Every edit is
  * asserted on the doc (ops) and on the rendered DOM, and each gesture is one undo step.
  */
 import { expect, test } from './fixtures';
@@ -117,9 +117,10 @@ test.describe('canvas editor', () => {
     expect(await canvas.undoLabels()).toEqual(['Resize layer', 'Hug contents']);
   });
 
-  test('edits style props in the inspector with literals and tokens', async ({ canvas, page }) => {
+  test('edits style props in the edit panel with literals and tokens', async ({ canvas, page }) => {
     await canvas.open();
     await canvas.click('n_herotitle1');
+    await page.getByRole('tab', { name: 'Pro' }).click();
     const ls = page.locator('[data-prop="letterSpacing"] input');
     await ls.fill('3px');
     await ls.press('Enter');
@@ -133,10 +134,7 @@ test.describe('canvas editor', () => {
     await expect.poll(() => canvas.computed('n_herotitle1', 'color')).toBe('rgb(249, 115, 22)');
 
     await page.getByRole('tab', { name: 'base' }).click();
-    await page
-      .locator('[data-prop="flexDirection"] select')
-      .waitFor({ state: 'attached' })
-      .catch(() => {});
+    await expect(page.getByRole('tab', { name: 'base' })).toHaveAttribute('aria-selected', 'true');
     expect(await canvas.undoLabels()).toEqual(['Set letter spacing', 'Set text color']);
     // undo reverts the render too
     await page.getByRole('button', { name: 'Undo' }).click();
@@ -196,7 +194,9 @@ test.describe('canvas editor', () => {
     const t = await canvas.box('n_herotitle1');
     await page.mouse.dblclick(t.x + t.width / 2, t.y + 12);
     expect(await canvas.isEditing('n_herotitle1')).toBe(false);
-    await expect(page.locator('[data-prop="letterSpacing"] input')).toBeDisabled();
+    // viewers can't enter edit mode: no property fields at all
+    await expect(page.getByTestId('edit-panel')).toContainText('view access');
+    await expect(page.locator('[data-prop]')).toHaveCount(0);
 
     await canvas.open('lock=other');
     await expect(page.getByText('Bob Builder is editing')).toBeVisible();

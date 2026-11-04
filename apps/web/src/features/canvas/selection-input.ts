@@ -4,6 +4,11 @@
  * Selection input (Story 3.2): click to select a node inside a frame (Shift toggles), hover
  * outlines, and keyboard tree navigation: Esc selects the parent, Enter the first child,
  * Tab/Shift+Tab cycle siblings, Delete removes the selection.
+ *
+ * All of it is edit mode only. In view and comment mode the canvas is a preview: pointer and
+ * keyboard input never select or edit (pan and zoom still work; comment clicks are handled by the
+ * comment overlay). In edit mode an active insert tool turns a press into an insert, tool keys
+ * (V T F R O L A P) pick tools, and Esc with nothing selected leaves edit mode, keeping changes.
  */
 import {
   firstChild,
@@ -14,12 +19,14 @@ import {
   toggleSelection,
   topLevelSelection,
 } from '@crunch/canvas';
+import type { Tool } from '@crunch/canvas';
 import { useEffect, type RefObject } from 'react';
 import { useDocStoreApi, useEditor, type DocStore } from '../doc-store';
-import { useCanvasStoreApi } from './canvas-store';
+import { saveEditSession, useCanvasStoreApi } from './canvas-store';
 import { frameIndex } from './context';
 import { hitFromEvent } from './dom';
 import { startNodeDrag } from './drag';
+import { startInsert } from './insert-tool';
 import { startTextEdit, textTargetFor } from './text-edit';
 import { isTypingEvent } from './gesture';
 
@@ -75,6 +82,18 @@ export function handleTreeKey(store: DocStore, e: KeyboardEvent): boolean {
   return false;
 }
 
+/** Tool shortcuts (Figma-like). */
+export const TOOL_KEYS: Record<string, Tool> = {
+  v: 'select',
+  t: 'text',
+  f: 'box',
+  r: 'rect',
+  o: 'ellipse',
+  l: 'line',
+  a: 'arrow',
+  p: 'pencil',
+};
+
 export function useSelectionInput(viewportRef: RefObject<HTMLDivElement | null>) {
   const store = useDocStoreApi();
   const canvas = useCanvasStoreApi();
@@ -82,10 +101,15 @@ export function useSelectionInput(viewportRef: RefObject<HTMLDivElement | null>)
 
   useEffect(() => {
     const el = viewportRef.current!;
+    const editing = () => canvas.getState().mode === 'edit';
     const onDown = (e: PointerEvent) => {
-      if (e.button !== 0 || e.defaultPrevented) return;
+      if (e.button !== 0 || e.defaultPrevented || !editing()) return;
       const hit = hitFromEvent(e);
       if (!hit) return;
+      if (canvas.getState().tool !== 'select') {
+        if (startInsert({ docStore: store, canvas, viewport: el, ds }, e, hit)) e.preventDefault();
+        return;
+      }
       const s = store.getState();
       const id = selectableAt(s.doc, hit.nodeId);
       if (!id) return;
@@ -99,7 +123,7 @@ export function useSelectionInput(viewportRef: RefObject<HTMLDivElement | null>)
     };
     const onMove = (e: PointerEvent) => {
       const c = canvas.getState();
-      if (e.buttons || c.gesture) return;
+      if (e.buttons || c.gesture || c.mode !== 'edit') return;
       const hit = hitFromEvent(e);
       if (!hit) return c.setHover(null);
       const id = selectableAt(store.getState().doc, hit.nodeId);
@@ -112,10 +136,16 @@ export function useSelectionInput(viewportRef: RefObject<HTMLDivElement | null>)
     };
     const onKey = (e: KeyboardEvent) => {
       if (isTypingEvent(e) || e.metaKey || e.ctrlKey || e.altKey) return;
-      if (canvas.getState().gesture) return;
-      // Only when focus is on the page or the canvas, not another pane's control.
+      if (canvas.getState().gesture || !editing()) return;
+      // Only when focus is on the page, the canvas or the edit panel, not another pane's control.
       const active = document.activeElement;
-      if (active && active !== document.body && !el.contains(active)) return;
+      if (
+        active &&
+        active !== document.body &&
+        !el.contains(active) &&
+        !active.closest('[data-cd-keyscope]')
+      )
+        return;
       // A focused canvas control (layers row, toolbar button) keeps Enter/Space/Tab for itself.
       if (active?.matches('button, select, a[href]') && ['Enter', 'Tab', ' '].includes(e.key))
         return;
@@ -130,11 +160,28 @@ export function useSelectionInput(viewportRef: RefObject<HTMLDivElement | null>)
           return;
         }
       }
+      const c = canvas.getState();
+      if (e.key === 'Escape' && c.tool !== 'select') {
+        c.setTool('select');
+        e.preventDefault();
+        return;
+      }
+      const tool = !e.shiftKey ? TOOL_KEYS[e.key.toLowerCase()] : undefined;
+      if (tool) {
+        if (!store.getState().readOnly) c.setTool(tool);
+        e.preventDefault();
+        return;
+      }
       if (handleTreeKey(store, e)) e.preventDefault();
+      else if (e.key === 'Escape') {
+        // Nothing selected: Esc leaves edit mode, keeping the changes.
+        void saveEditSession(store, canvas);
+        e.preventDefault();
+      }
     };
     const onDblClick = (e: MouseEvent) => {
       const hit = hitFromEvent(e);
-      if (!hit || canvas.getState().gesture) return;
+      if (!hit || canvas.getState().gesture || !editing()) return;
       const doc = store.getState().doc;
       const id = selectableAt(doc, hit.nodeId);
       if (!id) return;

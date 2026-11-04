@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { canvasStoreFor } from './canvas-store';
-import { CanvasPane, InspectorPane } from './index';
+import { CanvasPane, EditPanel } from './index';
 import { fakeRect, frameRoot, renderEditor } from './test-utils';
 
 afterEach(cleanup);
@@ -16,12 +16,14 @@ async function setup(ids: string[], prep?: (s: ReturnType<typeof renderEditor>['
   const r = renderEditor(
     <>
       <CanvasPane />
-      <InspectorPane />
+      <EditPanel />
     </>,
+    { mode: 'edit' },
   );
   await act(async () => {});
   if (prep) act(() => prep(r.store));
   act(() => r.store().getState().select({ frameId: 'f_desktop001', nodeIds: ids }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Pro' }));
   return { ...r, n: (id: string) => r.store().getState().doc.nodes[id]! };
 }
 
@@ -36,17 +38,17 @@ describe('multi-selection compares every node (finding 6)', () => {
               op: 'setStyle',
               id: 'n_herotitle1',
               breakpoint: 'lg',
-              prop: 'letterSpacing',
+              prop: 'blur',
               value: 2,
             },
           ],
           { source: 'inspector' },
         ),
     );
-    const input = row('letterSpacing').querySelector('input')!;
+    const input = row('blur').querySelector('input')!;
     fireEvent.change(input, { target: { value: '2' } });
     fireEvent.blur(input);
-    expect(n('n_herobody01').style.lg?.letterSpacing).toBe(2);
+    expect(n('n_herobody01').style.lg?.blur).toBe(2);
   });
 
   it('offers reset when only a secondary node sets the prop, and resets it', async () => {
@@ -59,17 +61,15 @@ describe('multi-selection compares every node (finding 6)', () => {
               op: 'setStyle',
               id: 'n_herobody01',
               breakpoint: 'lg',
-              prop: 'letterSpacing',
+              prop: 'blur',
               value: 4,
             },
           ],
           { source: 'inspector' },
         ),
     );
-    fireEvent.click(
-      within(row('letterSpacing')).getByRole('button', { name: /Reset Letter spacing/ }),
-    );
-    expect(n('n_herobody01').style.lg?.letterSpacing).toBeUndefined();
+    fireEvent.click(within(row('blur')).getByRole('button', { name: /Reset Blur/ }));
+    expect(n('n_herobody01').style.lg?.blur).toBeUndefined();
   });
 
   it('converts the rest of a mixed selection when one node is already absolute', async () => {
@@ -101,9 +101,9 @@ describe('locked layers are read-only everywhere (finding 11)', () => {
     // keyboard delete is ignored
     fireEvent.keyDown(window, { key: 'Delete' });
     expect(n('n_herotitle1')).toBeDefined();
-    // inspector fields are disabled, with an explanation
+    // property fields are disabled, with an explanation
     expect(screen.getByText(/Locked layers can.t be edited/)).toBeTruthy();
-    expect((row('letterSpacing').querySelector('input') as HTMLInputElement).disabled).toBe(true);
+    expect((row('blur').querySelector('input') as HTMLInputElement).disabled).toBe(true);
     // no resize handles
     fakeRect(screen.getByTestId('canvas'), { x: 0, y: 0, width: 1000, height: 800 });
     fakeRect(node('n_herotitle1'), { x: 10, y: 10, width: 50, height: 20 });
@@ -125,12 +125,12 @@ describe('locked layers are read-only everywhere (finding 11)', () => {
     expect(node('n_herotitle1').hasAttribute('contenteditable')).toBe(false);
   });
 
-  it('can be unlocked from the inspector, after which edits work again', async () => {
+  it('can be unlocked from the edit panel, after which edits work again', async () => {
     const { n } = await setup(['n_hero000001'], lockHero);
-    const locked = screen.getByRole('checkbox', { name: 'Locked' });
-    expect((locked as HTMLInputElement).checked).toBe(true);
+    const locked = screen.getByRole('button', { name: 'Unlock' });
+    expect(locked.getAttribute('aria-pressed')).toBe('true');
     fireEvent.click(locked);
     expect(n('n_hero000001').locked).toBeUndefined();
-    expect((row('letterSpacing').querySelector('input') as HTMLInputElement).disabled).toBe(false);
+    expect((row('blur').querySelector('input') as HTMLInputElement).disabled).toBe(false);
   });
 });

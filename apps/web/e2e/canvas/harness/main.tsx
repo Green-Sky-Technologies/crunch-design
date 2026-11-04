@@ -1,10 +1,11 @@
 /**
- * Canvas e2e harness (Story 3.9). Renders the real canvas feature (CanvasPane, InspectorPane,
+ * Canvas e2e harness (Story 3.9). Renders the real canvas feature (CanvasPane, EditPanel,
  * EditLockIndicator) inside EditorProvider, against an in-memory doc API, so Playwright can
  * drive the editor in Chromium, Firefox and WebKit without a Clerk session. Auth isn't weakened:
  * this page is bundled by the test runner and never served by the app.
  *
- * Query params: fixture=sample|empty|bench<N> (N frames of ~300 nodes), role=editor|viewer|admin, user=<id>, lock=other
+ * Query params: fixture=sample|empty|bench<N> (N frames of ~300 nodes), role=editor|viewer|admin, user=<id>, lock=other,
+ * mode=edit|view|comment (default edit: the canvas only selects and edits in edit mode)
  */
 import { permissionsFor, type Role } from '@crunch/authz';
 import {
@@ -18,7 +19,7 @@ import { useLayoutEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { canvasStoreFor } from '@/features/canvas/canvas-store';
 import { setLockApi, type LockState } from '@/features/canvas/lock';
-import { CanvasPane, EditLockIndicator, InspectorPane } from '@/features/canvas';
+import { CanvasPane, EditLockIndicator, EditPanel, type EditorMode } from '@/features/canvas';
 import {
   EditorProvider,
   useDocStore,
@@ -128,6 +129,9 @@ const t0 = performance.now();
 function Expose() {
   const store = useDocStoreApi();
   useLayoutEffect(() => {
+    canvasStoreFor(store)
+      .getState()
+      .setMode((params.get('mode') ?? 'edit') as EditorMode);
     window.__cd = {
       store,
       canvas: canvasStoreFor(store),
@@ -140,10 +144,8 @@ function Expose() {
   return null;
 }
 
+/** Lock indicator and save status. Undo/Redo live in the edit panel's tool row. */
 function TopBar() {
-  const undo = useDocStore((s) => s.undo);
-  const redo = useDocStore((s) => s.redo);
-  const canUndo = useDocStore((s) => s.canUndo());
   const status = useDocStore((s) => s.status);
   return (
     <div
@@ -159,12 +161,6 @@ function TopBar() {
       <strong>Harness</strong>
       <EditLockIndicator />
       <span data-testid="save-status">{status}</span>
-      <button onClick={undo} disabled={!canUndo} aria-label="Undo">
-        Undo
-      </button>
-      <button onClick={redo} aria-label="Redo">
-        Redo
-      </button>
     </div>
   );
 }
@@ -188,13 +184,13 @@ createRoot(document.getElementById('root')!).render(
     <Expose />
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <TopBar />
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', flex: 1, minHeight: 0 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '340px 1fr', flex: 1, minHeight: 0 }}>
+        <aside style={{ minHeight: 0, borderRight: '1px solid #e6e5e1' }}>
+          <EditPanel />
+        </aside>
         <section style={{ minWidth: 0, minHeight: 0 }}>
           <CanvasPane />
         </section>
-        <aside style={{ overflow: 'auto', borderLeft: '1px solid #e6e5e1' }}>
-          <InspectorPane />
-        </aside>
       </div>
     </div>
   </EditorProvider>,

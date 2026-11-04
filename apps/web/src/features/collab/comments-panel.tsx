@@ -6,8 +6,7 @@ import { useState } from 'react';
 import { useDocStore, useEditor } from '../doc-store';
 import { commentsApi, memberLabel, type Anchor, type Thread } from './api';
 import { MentionInput, useMembers } from './mention-input';
-import { pinAnchorPoint } from './anchor';
-import { overlayToCanvas, useCollab } from './store';
+import { useCollab } from './store';
 
 export function nodeLabel(doc: DesignDoc, nodeId: string): string {
   const n = doc.nodes[nodeId];
@@ -30,93 +29,7 @@ export function anchorLabel(doc: DesignDoc, a: Anchor, currentFrameId?: string |
 const timeFmt = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 export const fmtTime = (iso: string) => timeFmt.format(new Date(iso));
 
-/** Where a new comment goes: the selected node, or the current frame's top-left corner on the canvas. */
-function useComposerTarget(): {
-  anchor: Anchor;
-  label: string;
-  fallback?: { x: number; y: number };
-} | null {
-  const doc = useDocStore((s) => s.doc);
-  const selection = useDocStore((s) => s.selection);
-  const api = useCollab((s) => s.overlayApi);
-  const nodeId = selection.nodeIds[0];
-  const frameId = selection.frameId ?? doc.frames[0]?.id ?? null;
-  if (nodeId && frameId && doc.nodes[nodeId]) {
-    const rect = api?.getNodeRect(nodeId, frameId);
-    return {
-      anchor: { type: 'node', frameId, nodeId },
-      label: anchorLabel(doc, { type: 'node', frameId, nodeId }),
-      // Same point the pin is drawn at (node's top-right), so an orphaned pin stays in place.
-      fallback: rect && api ? overlayToCanvas(api, pinAnchorPoint(rect)) : undefined,
-    };
-  }
-  const frame = doc.frames.find((f) => f.id === frameId);
-  if (!frame) return null;
-  return {
-    anchor: { type: 'canvas', x: frame.canvas.x, y: frame.canvas.y },
-    label: `Canvas (${frame.name})`,
-  };
-}
-
-export interface ComposerExtras {
-  /** Render extra composer controls (ask-agent toggle) for the current target. */
-  renderExtra?: (anchor: Anchor) => React.ReactNode;
-  /** Called with the created thread; may start follow-up work (ask-agent). */
-  kind?: 'discussion' | 'agent_request';
-  afterCreate?: (t: Thread) => void;
-}
-
-function Composer({ extras }: { extras?: ComposerExtras }) {
-  const { project } = useEditor();
-  const target = useComposerTarget();
-  const upsert = useCollab((s) => s.upsertThread);
-  const focus = useCollab((s) => s.focusThread);
-  const [error, setError] = useState<string | null>(null);
-  if (!target) return null;
-  // Only element-pinned comments can be sent to the agent (it edits that node's subtree).
-  const kind = target.anchor.type === 'node' ? (extras?.kind ?? 'discussion') : 'discussion';
-  return (
-    <div className="border-b border-border p-3">
-      <div className="mb-2 text-xs text-muted">
-        Commenting on <span className="font-medium text-text">{target.label}</span>
-        {target.anchor.type === 'canvas' && ' · select an element to pin to it'}
-      </div>
-      <MentionInput
-        placeholder="Add a comment… use @ to mention"
-        submitLabel={kind === 'agent_request' ? 'Ask agent' : 'Comment'}
-        extra={extras?.renderExtra?.(target.anchor)}
-        onSubmit={async (body, mentions) => {
-          setError(null);
-          try {
-            const { thread } = await commentsApi.create({
-              projectId: project.id,
-              anchor: target.anchor,
-              body,
-              mentions,
-              kind,
-              fallback: target.fallback,
-            });
-            upsert(thread);
-            focus(thread.id);
-            if (kind === 'agent_request') extras?.afterCreate?.(thread);
-            return true;
-          } catch (e) {
-            setError(e instanceof Error ? e.message : 'Could not post comment');
-            return false;
-          }
-        }}
-      />
-      {error && <p className="mt-1 text-xs text-danger">{error}</p>}
-    </div>
-  );
-}
-
-export interface ThreadExtras {
-  /** Extra content under a thread's comments (ask-agent status). */
-  renderThreadExtra?: (t: Thread) => React.ReactNode;
-}
-
-function ThreadCard({ t, extras }: { t: Thread; extras?: ThreadExtras }) {
+function ThreadCard({ t }: { t: Thread }) {
   const { can } = useEditor();
   const doc = useDocStore((s) => s.doc);
   const select = useDocStore((s) => s.select);
@@ -145,7 +58,7 @@ function ThreadCard({ t, extras }: { t: Thread; extras?: ThreadExtras }) {
         </button>
         {t.kind === 'agent_request' && (
           <span className="rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-medium text-accent">
-            Ask agent
+            Agent request
           </span>
         )}
         {t.orphaned && (
@@ -190,7 +103,6 @@ function ThreadCard({ t, extras }: { t: Thread; extras?: ThreadExtras }) {
           </li>
         ))}
       </ol>
-      {extras?.renderThreadExtra?.(t)}
       {focused && canComment && t.status === 'open' && (
         <div className="mt-2">
           <MentionInput
@@ -221,13 +133,7 @@ function ThreadCard({ t, extras }: { t: Thread; extras?: ThreadExtras }) {
   );
 }
 
-export function CommentsPanel({
-  composerExtras,
-  threadExtras,
-}: {
-  composerExtras?: ComposerExtras;
-  threadExtras?: ThreadExtras;
-}) {
+export function CommentsPanel() {
   const { can, project } = useEditor();
   const threads = useCollab((s) => s.threads);
   const loaded = useCollab((s) => s.loaded);
@@ -239,7 +145,10 @@ export function CommentsPanel({
   return (
     <div className="flex h-full flex-col">
       {can('design:comment') ? (
-        <Composer extras={composerExtras} />
+        <p className="border-b border-border p-3 text-xs text-muted">
+          To comment, switch to <span className="font-medium text-text">Comment</span> mode (C) and
+          click an element.
+        </p>
       ) : (
         <p className="border-b border-border p-3 text-xs text-muted">
           {project.archived
@@ -262,7 +171,7 @@ export function CommentsPanel({
           <li className="p-3 text-sm text-muted">No comments yet.</li>
         )}
         {visible.map((t) => (
-          <ThreadCard key={t.id} t={t} extras={threadExtras} />
+          <ThreadCard key={t.id} t={t} />
         ))}
       </ul>
     </div>

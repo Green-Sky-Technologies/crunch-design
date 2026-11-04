@@ -36,9 +36,11 @@ test('a viewer sees the project read-only and can export HTML', async ({ as, run
     page.getByText('You have view access. Ask an editor to make changes.'),
   ).toBeVisible();
 
-  // Selecting works (to inspect), but the inspector is disabled and text can't be edited.
+  // No Edit mode: clicking selects nothing and text can't be edited.
+  await expect(page.getByRole('radio', { name: 'Edit' })).toHaveCount(0);
+  await page.keyboard.press('e');
+  await expect(page.getByRole('radio', { name: 'View' })).toHaveAttribute('aria-checked', 'true');
   await clickNode(page, SAMPLE.headline);
-  await expect(page.locator('[data-prop="letterSpacing"] input')).toBeDisabled();
   await expect(page.locator('[data-handle]')).toHaveCount(0);
   const b = await stableBox(node(page, SAMPLE.headline));
   await page.mouse.dblclick(b.x + 20, b.y + 10);

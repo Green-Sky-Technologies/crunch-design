@@ -19,7 +19,7 @@ describe('canvas frames (Story 3.1)', () => {
   });
 
   it('adds, duplicates, renames and deletes frames as undoable ops', async () => {
-    const { store } = renderEditor(<CanvasPane />);
+    const { store } = renderEditor(<CanvasPane />, { mode: 'edit' });
     await act(async () => {});
     fireEvent.click(screen.getByRole('button', { name: '+ Frame' }));
     fireEvent.click(screen.getByRole('menuitem', { name: /Mobile/ }));
@@ -61,7 +61,7 @@ describe('canvas frames (Story 3.1)', () => {
   });
 
   it('moves a frame by dragging its label, committing a single op on release', async () => {
-    const { store } = renderEditor(<CanvasPane />);
+    const { store } = renderEditor(<CanvasPane />, { mode: 'edit' });
     await act(async () => {});
     const canvas = canvasStoreFor(store());
     act(() => canvas.getState().setCamera({ x: 0, y: 0, z: 0.5 }));
@@ -77,7 +77,7 @@ describe('canvas frames (Story 3.1)', () => {
   });
 
   it('resizes a frame width with the handle, and Escape cancels a gesture', async () => {
-    const { store } = renderEditor(<CanvasPane />);
+    const { store } = renderEditor(<CanvasPane />, { mode: 'edit' });
     await act(async () => {});
     const canvas = canvasStoreFor(store());
     act(() => canvas.getState().setCamera({ x: 0, y: 0, z: 1 }));
@@ -103,7 +103,7 @@ describe('canvas frames (Story 3.1)', () => {
   });
 
   it('zooms with ctrl+wheel and the toolbar, and pans with the wheel', async () => {
-    const { store } = renderEditor(<CanvasPane />);
+    const { store } = renderEditor(<CanvasPane />, { mode: 'edit' });
     await act(async () => {});
     const canvas = canvasStoreFor(store());
     act(() => canvas.getState().setCamera({ x: 0, y: 0, z: 1 }));
