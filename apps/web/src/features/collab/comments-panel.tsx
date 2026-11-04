@@ -56,8 +56,8 @@ function useComposerTarget(): {
 }
 
 export interface ComposerExtras {
-  /** Render extra composer controls (ask-agent toggle). */
-  renderExtra?: () => React.ReactNode;
+  /** Render extra composer controls (ask-agent toggle) for the current target. */
+  renderExtra?: (anchor: Anchor) => React.ReactNode;
   /** Called with the created thread; may start follow-up work (ask-agent). */
   kind?: 'discussion' | 'agent_request';
   afterCreate?: (t: Thread) => void;
@@ -70,6 +70,8 @@ function Composer({ extras }: { extras?: ComposerExtras }) {
   const focus = useCollab((s) => s.focusThread);
   const [error, setError] = useState<string | null>(null);
   if (!target) return null;
+  // Only element-pinned comments can be sent to the agent (it edits that node's subtree).
+  const kind = target.anchor.type === 'node' ? (extras?.kind ?? 'discussion') : 'discussion';
   return (
     <div className="border-b border-border p-3">
       <div className="mb-2 text-xs text-muted">
@@ -78,8 +80,8 @@ function Composer({ extras }: { extras?: ComposerExtras }) {
       </div>
       <MentionInput
         placeholder="Add a comment… use @ to mention"
-        submitLabel={extras?.kind === 'agent_request' ? 'Ask agent' : 'Comment'}
-        extra={extras?.renderExtra?.()}
+        submitLabel={kind === 'agent_request' ? 'Ask agent' : 'Comment'}
+        extra={extras?.renderExtra?.(target.anchor)}
         onSubmit={async (body, mentions) => {
           setError(null);
           try {
@@ -88,12 +90,12 @@ function Composer({ extras }: { extras?: ComposerExtras }) {
               anchor: target.anchor,
               body,
               mentions,
-              kind: extras?.kind ?? 'discussion',
+              kind,
               fallback: target.fallback,
             });
             upsert(thread);
             focus(thread.id);
-            extras?.afterCreate?.(thread);
+            if (kind === 'agent_request') extras?.afterCreate?.(thread);
             return true;
           } catch (e) {
             setError(e instanceof Error ? e.message : 'Could not post comment');

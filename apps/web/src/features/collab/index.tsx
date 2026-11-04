@@ -1,11 +1,13 @@
 'use client';
 
 /**
- * Collaboration controls in the editor top bar (Epic 6): comments (6.1), notifications.
+ * Collaboration controls in the editor top bar (Epic 6): comments (6.1) with ask-agent
+ * requests (5.7), notifications.
  * Reads everything from useEditor() / useDocStore(); no props (editor-shell slot).
  */
 import { useEffect } from 'react';
 import { useEditor } from '../doc-store';
+import { useAskAgentExtras } from './ask-agent-ui';
 import { useCommentPinsOverlay } from './comment-pins';
 import { CommentsPanel } from './comments-panel';
 import { Drawer } from './drawer';
@@ -43,11 +45,16 @@ export function CollabControls() {
         Comments{openCount ? ` (${openCount})` : ''}
       </button>
       <NotificationsBell />
-      {panel === 'comments' && (
-        <Drawer title="Comments">
-          <CommentsPanel />
-        </Drawer>
-      )}
+      {panel === 'comments' && <CommentsDrawer />}
     </>
+  );
+}
+
+function CommentsDrawer() {
+  const askAgent = useAskAgentExtras();
+  return (
+    <Drawer title="Comments">
+      <CommentsPanel composerExtras={askAgent.composer} threadExtras={askAgent.thread} />
+    </Drawer>
   );
 }
