@@ -27,8 +27,9 @@ import {
   type CommentThreadRow,
   type Db,
 } from '@crunch/db';
-import { id as nodeIdSchema, type DesignDoc, type Node } from '@crunch/doc-model';
+import { id as nodeIdSchema, type DesignDoc } from '@crunch/doc-model';
 import { z } from 'zod';
+import { frameOfNode } from '@/features/collab/anchor';
 import { recordActivity } from './activity';
 import { getDoc } from './design-docs';
 import { getProject } from './projects';
@@ -86,6 +87,11 @@ export interface ThreadView {
   fallback: CanvasPoint | null;
   /** Node anchor whose node no longer exists in the current doc. */
   orphaned: boolean;
+  /**
+   * For node anchors: the frame the node is in now (it may have moved to another frame since
+   * the thread was created); null when orphaned or for canvas anchors.
+   */
+  currentFrameId: string | null;
   agentConversationId: string | null;
   createdBy: string;
   createdAt: Date;
@@ -108,19 +114,10 @@ function parse<T>(schema: z.ZodType<T>, input: unknown): T {
 }
 
 /** True if `nodeId` exists and belongs to `frameId`'s tree. */
-export function nodeInFrame(doc: DesignDoc, frameId: string, nodeId: string): boolean {
-  const frame = doc.frames.find((f) => f.id === frameId);
-  if (!frame) return false;
-  let cur: Node | undefined = doc.nodes[nodeId];
-  for (let i = 0; cur && i < 10_000; i++) {
-    if (cur.id === frame.rootNodeId) return true;
-    cur = cur.parentId ? doc.nodes[cur.parentId] : undefined;
-  }
-  return false;
-}
+export { frameOfNode };
 
-function isOrphaned(doc: DesignDoc, anchor: CommentAnchor): boolean {
-  return anchor.type === 'node' && !nodeInFrame(doc, anchor.frameId, anchor.nodeId);
+export function nodeInFrame(doc: DesignDoc, frameId: string, nodeId: string): boolean {
+  return frameOfNode(doc, nodeId) === frameId;
 }
 
 /** Workspace members a comment may mention (for autocomplete and validation). */
@@ -234,6 +231,8 @@ async function hydrate(db: Db, threads: CommentThreadRow[], doc: DesignDoc): Pro
   return threads.map((t) => {
     const anchor = commentAnchor.parse(t.anchor);
     const fb = point.safeParse(t.fallback);
+    // A node anchor stays live wherever the node is now (moves across frames included).
+    const currentFrameId = anchor.type === 'node' ? frameOfNode(doc, anchor.nodeId) : null;
     return {
       id: t.id,
       projectId: t.projectId,
@@ -241,7 +240,8 @@ async function hydrate(db: Db, threads: CommentThreadRow[], doc: DesignDoc): Pro
       status: t.status,
       anchor,
       fallback: fb.success ? fb.data : null,
-      orphaned: isOrphaned(doc, anchor),
+      orphaned: anchor.type === 'node' && currentFrameId === null,
+      currentFrameId,
       agentConversationId: t.agentConversationId,
       createdBy: t.createdBy,
       createdAt: t.createdAt,
@@ -290,9 +290,12 @@ export async function createThread(db: Db, actor: Actor, input: unknown): Promis
 
   let fallback: CanvasPoint;
   if (data.anchor.type === 'node') {
-    const { frameId, nodeId } = data.anchor;
-    if (!nodeInFrame(doc, frameId, nodeId))
+    const { nodeId } = data.anchor;
+    const frameId = frameOfNode(doc, nodeId);
+    if (!frameId)
       throw new ValidationError('That element no longer exists', { anchor: ['Unknown node'] });
+    // Store the node's actual frame (the client's may be stale).
+    data.anchor = { ...data.anchor, frameId };
     const frame = doc.frames.find((f) => f.id === frameId)!;
     fallback = data.fallback ?? { x: frame.canvas.x, y: frame.canvas.y };
   } else {

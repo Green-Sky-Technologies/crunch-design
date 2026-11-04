@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { useDocStore, useEditor } from '../doc-store';
 import { commentsApi, memberLabel, type Anchor, type Thread } from './api';
 import { MentionInput, useMembers } from './mention-input';
+import { pinAnchorPoint } from './anchor';
 import { overlayToCanvas, useCollab } from './store';
 
 export function nodeLabel(doc: DesignDoc, nodeId: string): string {
@@ -19,9 +20,10 @@ export function nodeLabel(doc: DesignDoc, nodeId: string): string {
   return n.type === 'box' ? `<${n.tag}>` : n.type[0]!.toUpperCase() + n.type.slice(1);
 }
 
-export function anchorLabel(doc: DesignDoc, a: Anchor): string {
+export function anchorLabel(doc: DesignDoc, a: Anchor, currentFrameId?: string | null): string {
   if (a.type === 'canvas') return 'Canvas';
-  const frame = doc.frames.find((f) => f.id === a.frameId);
+  const fid = currentFrameId ?? a.frameId;
+  const frame = doc.frames.find((f) => f.id === fid);
   return `${frame?.name ?? 'Frame'} › ${nodeLabel(doc, a.nodeId)}`;
 }
 
@@ -44,7 +46,8 @@ function useComposerTarget(): {
     return {
       anchor: { type: 'node', frameId, nodeId },
       label: anchorLabel(doc, { type: 'node', frameId, nodeId }),
-      fallback: rect && api ? overlayToCanvas(api, { x: rect.x, y: rect.y }) : undefined,
+      // Same point the pin is drawn at (node's top-right), so an orphaned pin stays in place.
+      fallback: rect && api ? overlayToCanvas(api, pinAnchorPoint(rect)) : undefined,
     };
   }
   const frame = doc.frames.find((f) => f.id === frameId);
@@ -128,7 +131,7 @@ function ThreadCard({ t, extras }: { t: Thread; extras?: ThreadExtras }) {
   const goTo = () => {
     focus(t.id);
     if (t.anchor.type === 'node' && !t.orphaned)
-      select({ frameId: t.anchor.frameId, nodeIds: [t.anchor.nodeId] });
+      select({ frameId: t.currentFrameId ?? t.anchor.frameId, nodeIds: [t.anchor.nodeId] });
   };
 
   return (
@@ -138,7 +141,7 @@ function ThreadCard({ t, extras }: { t: Thread; extras?: ThreadExtras }) {
     >
       <div className="mb-2 flex items-center gap-2 text-xs">
         <button className="truncate text-left text-muted hover:text-text" onClick={goTo}>
-          {anchorLabel(doc, t.anchor)}
+          {anchorLabel(doc, t.anchor, t.currentFrameId)}
         </button>
         {t.kind === 'agent_request' && (
           <span className="rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-medium text-accent">

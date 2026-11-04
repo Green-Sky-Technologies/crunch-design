@@ -43,6 +43,7 @@ const thread = (over: Partial<Thread>): Thread => ({
   anchor: { type: 'node', frameId: 'f_frame0001', nodeId: 'n_node000001' },
   fallback: { x: 5, y: 5 },
   orphaned: false,
+  currentFrameId: 'f_frame0001',
   agentConversationId: null,
   createdBy: 'u',
   createdAt: new Date().toISOString(),

@@ -4,6 +4,7 @@
  * it's module-level because the canvas renders our overlay in its own subtree.
  */
 import type { OverlayApi } from '@crunch/contracts/canvas-overlay';
+import type { DesignDoc } from '@crunch/doc-model';
 import { create } from 'zustand';
 import { commentsApi, type Thread } from './api';
 
@@ -26,6 +27,8 @@ export interface CollabState {
   focusedThreadId: string | null;
   overlayApi: OverlayApi | null;
   agent: Record<string, AgentState>;
+  /** The editor's live doc (mirrored by CollabControls) so pins track moves/deletes instantly. */
+  doc: DesignDoc | null;
 
   setPanel(p: CollabPanel): void;
   togglePanel(p: Exclude<CollabPanel, null>): void;
@@ -33,6 +36,7 @@ export interface CollabState {
   focusThread(id: string | null): void;
   setOverlayApi(api: OverlayApi | null): void;
   setAgentState(threadId: string, s: AgentState): void;
+  setDoc(doc: DesignDoc | null): void;
   load(projectId: string): Promise<void>;
   upsertThread(t: Thread): void;
 }
@@ -47,6 +51,7 @@ export const useCollab = create<CollabState>()((set, get) => ({
   focusedThreadId: null,
   overlayApi: null,
   agent: {},
+  doc: null,
 
   setPanel: (panel) => set({ panel }),
   togglePanel: (p) => set((s) => ({ panel: s.panel === p ? null : p })),
@@ -55,6 +60,9 @@ export const useCollab = create<CollabState>()((set, get) => ({
     set(focusedThreadId ? { focusedThreadId, panel: 'comments' } : { focusedThreadId }),
   setOverlayApi: (overlayApi) => {
     if (get().overlayApi !== overlayApi) set({ overlayApi });
+  },
+  setDoc: (doc) => {
+    if (get().doc !== doc) set({ doc });
   },
   setAgentState: (threadId, s) => set((st) => ({ agent: { ...st.agent, [threadId]: s } })),
 

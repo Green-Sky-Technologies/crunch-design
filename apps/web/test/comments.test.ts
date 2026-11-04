@@ -109,6 +109,46 @@ describe('comment threads', () => {
     void rootId;
   });
 
+  it('keeps a thread live when its node moves to another frame', async () => {
+    const { editor, project, frameId } = await setup();
+    const t = await createThread(db, editor, {
+      projectId: project.id,
+      anchor: nodeAnchor(frameId),
+      body: 'Follow me',
+    });
+    expect(t.currentFrameId).toBe(frameId);
+    const mobileRoot = 'n_mobroot0001';
+    await commit(editor, project.id, [
+      {
+        op: 'insertFrame',
+        index: 1,
+        frame: {
+          id: 'f_mobile00001',
+          name: 'Mobile',
+          rootNodeId: mobileRoot,
+          canvas: { x: 1400, y: 0 },
+          width: 390,
+          height: 800,
+          previewBreakpoints: [],
+        },
+        nodes: [{ ...box(mobileRoot, 'n_cardA00001'), parentId: null }],
+      },
+      { op: 'moveNode', id: 'n_cardA00001', parentId: mobileRoot, index: 0 },
+    ]);
+    const [after] = await listThreads(db, editor, project.id);
+    expect(after!.orphaned).toBe(false);
+    expect(after!.currentFrameId).toBe('f_mobile00001');
+
+    // A stale client frame id is corrected to the node's real frame on create.
+    const created = await createThread(db, editor, {
+      projectId: project.id,
+      anchor: nodeAnchor(frameId), // card A is no longer in this frame
+      body: 'Stale frame id',
+    });
+    expect(created.anchor).toMatchObject({ frameId: 'f_mobile00001' });
+    expect(created.orphaned).toBe(false);
+  });
+
   it('supports canvas-position threads, replies, resolve and reopen', async () => {
     const { editor, project } = await setup();
     const t = await createThread(db, editor, {

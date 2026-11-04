@@ -62,7 +62,7 @@ export async function sendThreadToAgent(
   const r = await requestAgentEdit(
     {
       projectId: t.projectId,
-      frameId: t.anchor.frameId,
+      frameId: t.currentFrameId ?? t.anchor.frameId,
       nodeId: t.anchor.nodeId,
       prompt,
       commentThreadId: t.id,

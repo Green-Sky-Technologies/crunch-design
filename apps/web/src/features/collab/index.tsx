@@ -7,7 +7,7 @@
  * Reads everything from useEditor() / useDocStore(); no props (editor-shell slot).
  */
 import { useEffect } from 'react';
-import { useEditor } from '../doc-store';
+import { useDocStore, useEditor } from '../doc-store';
 import { ActivityPanel } from './activity-panel';
 import { useAskAgentExtras } from './ask-agent-ui';
 import { useCommentPinsOverlay } from './comment-pins';
@@ -57,6 +57,12 @@ export function CollabControls() {
   const openCount = useCollab((s) => s.threads.filter((t) => t.status === 'open').length);
   useThreadSync(project.id);
   useCommentPinsOverlay();
+  const doc = useDocStore((s) => s.doc);
+  const setDoc = useCollab((s) => s.setDoc);
+  useEffect(() => {
+    setDoc(doc);
+  }, [doc, setDoc]);
+  useEffect(() => () => setDoc(null), [setDoc]);
 
   return (
     <>

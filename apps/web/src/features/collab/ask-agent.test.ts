@@ -19,6 +19,7 @@ const thread = (over: Partial<Thread> = {}): Thread => ({
   anchor: { type: 'node', frameId: 'f_frame0001', nodeId: 'n_node000001' },
   fallback: null,
   orphaned: false,
+  currentFrameId: 'f_frame0001',
   agentConversationId: null,
   createdBy: 'u',
   createdAt: new Date().toISOString(),
@@ -120,6 +121,21 @@ describe('sendThreadToAgent', () => {
       status: 'unavailable',
     });
     expect(f).toHaveBeenCalledTimes(1);
+  });
+
+  it("targets the node's current frame after it moved", async () => {
+    let sent: { frameId?: string } = {};
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+        sent = JSON.parse(String(init?.body));
+        return json(404, {});
+      }),
+    );
+    await sendThreadToAgent(thread({ currentFrameId: 'f_moved000001' }), {
+      allowWiderScope: false,
+    });
+    expect(sent.frameId).toBe('f_moved000001');
   });
 
   it('refuses canvas-anchored threads', async () => {
