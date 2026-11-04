@@ -257,12 +257,13 @@ export interface SentMessage {
   needsRun: boolean;
 }
 
-function userTurnFor(
-  context: string,
-  prompt: string,
-  attachments: Attachment[],
-): Anthropic.MessageParam {
-  const content: Anthropic.ContentBlockParam[] = [{ type: 'text', text: context }];
+/**
+ * The persisted user turn: attachments + prompt, never the document. The current document
+ * context is attached only to the newest user message when the turn runs (SPEC §2.3), so
+ * history doesn't replay a full <document> per past turn.
+ */
+function userTurnFor(prompt: string, attachments: Attachment[]): Anthropic.MessageParam {
+  const content: Anthropic.ContentBlockParam[] = [];
   for (const a of attachments) {
     if (a.type === 'image') content.push({ type: 'image', source: { type: 'url', url: a.url } });
     else if (a.type === 'url')
@@ -315,12 +316,11 @@ export async function sendMessage(
     throw e;
   }
 
-  const { doc } = await getDoc(db, actor, input.projectId);
   const contextRef: TurnContextRef = opts.scope
     ? { scopeNodeId: opts.scope.scopeNodeId, frameId: opts.scope.frameId }
     : { selection: input.selection, frameId: input.frameId ?? null };
   const attachments = input.attachments ?? [];
-  const userTurn = userTurnFor(buildTurnContext(doc, contextRef), input.prompt, attachments);
+  const userTurn = userTurnFor(input.prompt, attachments);
   const detected = opts.scope ? null : detectJobRequest(input.prompt);
 
   return db.transaction(async (tx) => {
@@ -432,6 +432,43 @@ export async function sendMessage(
 }
 
 /** Earlier complete turns of a conversation, for the model. Failed and cancelled replies are skipped. */
+/** Upper bound on replayed history (JSON characters, ~4 chars/token). */
+export const MAX_HISTORY_CHARS = 200_000;
+
+const isDocBlock = (b: unknown) =>
+  typeof b === 'object' &&
+  b !== null &&
+  (b as { type?: string }).type === 'text' &&
+  ((b as { text?: string }).text ?? '').startsWith('<document>');
+
+/** Older rows stored the document inside the user turn; history never replays it. */
+function withoutDocument(turn: Anthropic.MessageParam): Anthropic.MessageParam {
+  if (typeof turn.content === 'string') return turn;
+  return { ...turn, content: turn.content.filter((b) => !isDocBlock(b)) } as Anthropic.MessageParam;
+}
+
+/**
+ * Keep the most recent exchanges within MAX_HISTORY_CHARS. The cut only moves when the window
+ * overflows, and then jumps to half the budget, so between jumps the history prefix stays the
+ * same from request to request (prompt-cache friendly).
+ */
+export function windowHistory(
+  exchanges: Anthropic.MessageParam[][],
+  maxChars = MAX_HISTORY_CHARS,
+): Anthropic.MessageParam[] {
+  const sizes = exchanges.map((e) => JSON.stringify(e).length);
+  // Replays how the window evolves turn by turn, so the result for N exchanges only differs
+  // from N-1 at the moment of an overflow.
+  let cut = 0;
+  let acc = 0;
+  for (let i = 0; i < sizes.length; i++) {
+    acc += sizes[i]!;
+    if (acc > maxChars) while (acc > maxChars / 2 && cut < i) acc -= sizes[cut++]!;
+  }
+  return exchanges.slice(cut).flat();
+}
+
+/** Earlier complete turns of a conversation, for the model. Failed and cancelled replies are skipped. */
 async function historyBefore(db: Db, conversationId: string, seq: number) {
   const rows = await db
     .select()
@@ -440,13 +477,15 @@ async function historyBefore(db: Db, conversationId: string, seq: number) {
       and(eq(agentMessages.conversationId, conversationId), sql`${agentMessages.seq} < ${seq}`),
     )
     .orderBy(asc(agentMessages.seq));
-  const history: Anthropic.MessageParam[] = [];
+  // One exchange = a user message and its (complete) reply; cuts happen between exchanges.
+  const exchanges: Anthropic.MessageParam[][] = [];
   for (const r of rows) {
-    if (r.role === 'user') history.push(...(r.content as StoredUserContent).turns);
-    else if (r.role === 'assistant' && r.status === 'complete')
-      history.push(...((r.content as StoredAssistantContent).turns ?? []));
+    if (r.role === 'user')
+      exchanges.push((r.content as StoredUserContent).turns.map(withoutDocument));
+    else if (r.role === 'assistant' && r.status === 'complete' && exchanges.length)
+      exchanges.at(-1)!.push(...((r.content as StoredAssistantContent).turns ?? []));
   }
-  return history;
+  return windowHistory(exchanges);
 }
 
 export interface RunDeps {
@@ -539,7 +578,18 @@ export async function runAssistantMessage(
       .from(agentMessages)
       .where(and(eq(agentMessages.conversationId, conv.id), eq(agentMessages.seq, row.seq - 1)));
     if (!userRow || userRow.role !== 'user') throw new ValidationError('Missing user message');
-    const userTurn = (userRow.content as StoredUserContent).turns[0]!;
+    const stored = userRow.content as StoredUserContent;
+    const { doc } = await getDoc(db, actor, conv.projectId);
+    const base = withoutDocument(stored.turns[0]!);
+    const userTurn: Anthropic.MessageParam = {
+      role: 'user',
+      content: [
+        { type: 'text', text: buildTurnContext(doc, stored.context ?? {}) },
+        ...(typeof base.content === 'string'
+          ? [{ type: 'text' as const, text: base.content }]
+          : base.content),
+      ],
+    };
     const scope = conv.scope as { nodeId: string; allowWider?: boolean } | null;
     const host = await createDbToolHost(db, actor, {
       projectId: conv.projectId,
