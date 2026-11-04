@@ -189,6 +189,18 @@ describe('design systems', () => {
       '#ff0000',
     );
 
+    // renaming or changing the default doesn't invalidate an open editor's revision
+    const other = await createDesignSystem(db, editor, { name: 'Other' });
+    await updateDesignSystemDetails(db, editor, ds.id, { name: 'Renamed' });
+    await setDefaultDesignSystem(db, editor, other.id);
+    await setDefaultDesignSystem(db, editor, ds.id);
+    const again = await saveDesignSystemDraft(db, editor, ds.id, {
+      spec: { ...spec, guidelines: 'x' },
+      baseRevision: saved.revision,
+    });
+    expect((await getDesignSystem(db, editor, ds.id)).system.name).toBe('Renamed');
+    await publishDesignSystem(db, editor, ds.id, { baseRevision: again.revision });
+
     // stale revision is rejected
     await expect(
       saveDesignSystemDraft(db, editor, ds.id, { spec, baseRevision: ds.revision }),

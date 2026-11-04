@@ -118,6 +118,9 @@ export function draftSpecOf(row: Pick<DesignSystem, 'draft'>): DesignSystemSpec 
   return r.success ? r.data : starterDesignSystem();
 }
 
+/** Assigning this leaves updated_at as it is (overrides the schema's $onUpdate). */
+const KEEP_UPDATED_AT = sql`${designSystems.updatedAt}`;
+
 export const revisionOf = (row: Pick<DesignSystem, 'updatedAt'>) => String(row.updatedAt.getTime());
 
 function blankSpec(): DesignSystemSpec {
@@ -323,13 +326,15 @@ export async function updateDesignSystemDetails(
 ): Promise<DesignSystemSummary> {
   assertCan(actor.role, 'design_system:edit');
   await loadRow(db, actor, id);
-  const set: Partial<DesignSystem> = { updatedBy: actor.userId };
+  // Metadata isn't part of the draft: keep updatedAt (the draft revision) so an open editor's
+  // next save or publish isn't rejected as a concurrent edit.
+  const set: { name?: string; description?: string | null } = {};
   if (input.name !== undefined) set.name = parseField(nameSchema, input.name, 'name');
   if (input.description !== undefined)
     set.description = parseField(descriptionSchema, input.description ?? '', 'description') || null;
   const [row] = await db
     .update(designSystems)
-    .set(set)
+    .set({ ...set, updatedAt: KEEP_UPDATED_AT })
     .where(and(eq(designSystems.id, id), eq(designSystems.workspaceId, actor.workspace.id)))
     .returning();
   return (await summarize(db, [row!]))[0]!;
@@ -342,13 +347,13 @@ export async function setDefaultDesignSystem(db: Db, actor: Actor, id: string): 
     await loadRow(tx, actor, id, { lock: true });
     await tx
       .update(designSystems)
-      .set({ isDefault: false })
+      .set({ isDefault: false, updatedAt: KEEP_UPDATED_AT })
       .where(
         and(eq(designSystems.workspaceId, actor.workspace.id), eq(designSystems.isDefault, true)),
       );
     await tx
       .update(designSystems)
-      .set({ isDefault: true })
+      .set({ isDefault: true, updatedAt: KEEP_UPDATED_AT })
       .where(and(eq(designSystems.id, id), eq(designSystems.workspaceId, actor.workspace.id)));
   });
 }
