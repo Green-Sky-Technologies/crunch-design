@@ -1,12 +1,13 @@
 /**
- * Which DesignSystemSpec a project renders with (Story 4.2):
- *   pinned published version         ->  that version's spec (immutable)
- *   no pin, system has been published ->  the latest published version
- *   no pin, never published           ->  the system's draft, or the built-in starter
+ * Which DesignSystemSpec a project renders with (Story 4.2). A project never renders a mutable
+ * draft:
+ *   pinned published version  ->  that version's spec (immutable)
+ *   no pin                    ->  the latest published version
+ *   system never published    ->  v1 is published from its draft first (ensurePublished); if
+ *                                 that's impossible, the built-in starter
  *
- * Draft edits therefore never reach a project once its system has a published version, and
- * publishing pins every unpinned project to what it was already showing (design-systems.ts), so a
- * newer version arrives only through an explicit upgrade.
+ * Every system gets v1 when it's created, publishing pins each unpinned project to what it was
+ * already showing, and so a newer version only arrives through an explicit upgrade or switch.
  *
  * Integration point (projects.ts is owned elsewhere): createProject should set
  * `designSystemVersionId: await latestPublishedVersionId(db, workspaceId, designSystemId)` and
@@ -28,7 +29,7 @@ import {
 import { designSystemSpec, starterDesignSystem, type DesignSystemSpec } from '@crunch/doc-model';
 import { z } from 'zod';
 import { getDoc } from './design-docs';
-import { draftSpecOf } from './design-systems';
+import { ensurePublished } from './design-systems';
 import { diffSystemsForDoc, type SystemDiff } from './design-systems/diff';
 import { getProject } from './projects';
 import { NotFoundError, ValidationError, type Actor } from './types';
@@ -73,7 +74,16 @@ export async function resolveProjectDesignSystem(
   project: Project,
 ): Promise<ResolvedDesignSystem> {
   assertCan(actor.role, 'design_system:read');
-  const [ds] = await db
+  const starter = (name = 'Starter'): ResolvedDesignSystem => ({
+    id: project.designSystemId,
+    name,
+    version: null,
+    spec: starterDesignSystem(),
+    latestVersion: null,
+    pinned: false,
+    upgradeAvailable: false,
+  });
+  let [ds] = await db
     .select()
     .from(designSystems)
     .where(
@@ -83,16 +93,16 @@ export async function resolveProjectDesignSystem(
       ),
     )
     .limit(1);
-  if (!ds)
-    return {
-      id: project.designSystemId,
-      name: 'Starter',
-      version: null,
-      spec: starterDesignSystem(),
-      latestVersion: null,
-      pinned: false,
-      upgradeAvailable: false,
-    };
+  if (!ds) return starter();
+  if (ds.latestVersion === null) {
+    // Never published (e.g. the workspace default created by upsertWorkspace): publish v1 now
+    // rather than render the mutable draft. If that fails, render the built-in starter.
+    try {
+      ds = (await ensurePublished(db, actor.workspace.id, ds.id)) ?? ds;
+    } catch (err) {
+      console.error('[design-systems] could not create v1', err instanceof Error ? err.name : err);
+    }
+  }
   const latestVersion = ds.latestVersion;
   if (project.designSystemVersionId) {
     const v = await versionRow(db, ds.id, { id: project.designSystemVersionId });
@@ -120,15 +130,8 @@ export async function resolveProjectDesignSystem(
         upgradeAvailable: false,
       };
   }
-  return {
-    id: ds.id,
-    name: ds.name,
-    version: null,
-    spec: draftSpecOf(ds),
-    latestVersion,
-    pinned: false,
-    upgradeAvailable: false,
-  };
+  // No published version could be found or created: never fall back to the draft.
+  return { ...starter(ds.name), id: ds.id };
 }
 
 /** Version id a new project should pin (the latest published), or null if never published. */
@@ -137,6 +140,7 @@ export async function latestPublishedVersionId(
   workspaceId: string,
   designSystemId: string,
 ): Promise<string | null> {
+  await ensurePublished(db, workspaceId, designSystemId);
   const [row] = await db
     .select({ id: designSystemVersions.id })
     .from(designSystems)
@@ -171,6 +175,14 @@ export async function listProjectDesignSystems(
 ): Promise<ProjectDesignSystemStatus[]> {
   assertCan(actor.role, 'project:read');
   assertCan(actor.role, 'design_system:read');
+  // Make sure every system in use has a v1, so no row reports a draft.
+  const unpublished = await db
+    .select({ id: designSystems.id })
+    .from(designSystems)
+    .where(
+      and(eq(designSystems.workspaceId, actor.workspace.id), isNull(designSystems.latestVersion)),
+    );
+  for (const u of unpublished) await ensurePublished(db, actor.workspace.id, u.id);
   const rows = await db
     .select({
       projectId: projects.id,
@@ -224,7 +236,11 @@ export async function pinProjectDesignSystemVersion(
     )
     .limit(1);
   if (!ds) throw new NotFoundError('Design system not found');
-  const target = version ?? ds.latestVersion;
+  const latest =
+    ds.latestVersion ??
+    (await ensurePublished(db, actor.workspace.id, ds.id))?.latestVersion ??
+    null;
+  const target = version ?? latest;
   if (target === null) throw new ValidationError('This design system has not been published yet');
   const v = Number.isInteger(target) ? await versionRow(db, ds.id, { version: target }) : undefined;
   if (!v) throw new NotFoundError('Version not found');
@@ -269,9 +285,12 @@ async function resolveTarget(db: Db, actor: Actor, target: SwitchTarget): Promis
     )
     .limit(1);
   if (!ds) throw new NotFoundError('Design system not found');
-  const version = target.version ?? ds.latestVersion;
-  if (version === null)
-    return { id: ds.id, name: ds.name, version: null, versionId: null, spec: draftSpecOf(ds) };
+  // Switching always pins a real version: publish v1 first if the target never was.
+  const latest =
+    ds.latestVersion ?? (await ensurePublished(db, actor.workspace.id, ds.id))?.latestVersion;
+  const version = target.version ?? latest;
+  if (version === null || version === undefined)
+    throw new ValidationError('This design system has no published version');
   const v = Number.isInteger(version) ? await versionRow(db, ds.id, { version }) : undefined;
   if (!v) throw new NotFoundError('Version not found');
   return {

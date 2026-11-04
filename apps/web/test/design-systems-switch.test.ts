@@ -85,22 +85,27 @@ describe('switching a project between systems', () => {
     });
     const p = await createProject(db, editor, { name: 'P' });
 
-    // Draft-only target (never published).
-    const draftPreview = await previewProjectDesignSystemSwitch(db, editor, p.id, {
+    // Brand v1 (created with the system) is the starter; the draft edit isn't published yet.
+    const v1Preview = await previewProjectDesignSystemSwitch(db, editor, p.id, {
       designSystemId: brand.id,
     });
-    expect(draftPreview.target).toMatchObject({ name: 'Brand', version: null });
-    expect(draftPreview.diff.tokens.map((t) => t.path)).toEqual(['color.background']);
-    // Previewing writes nothing.
-    expect((await getProject(db, editor, p.id)).designSystemId).toBe(def!.id);
+    expect(v1Preview.target).toMatchObject({ name: 'Brand', version: 1 });
+    expect(v1Preview.diff.unchanged).toBe(true);
 
     await publishDesignSystem(db, editor, brand.id);
+    const preview = await previewProjectDesignSystemSwitch(db, editor, p.id, {
+      designSystemId: brand.id,
+    });
+    expect(preview.target).toMatchObject({ version: 2 });
+    expect(preview.diff.tokens.map((t) => t.path)).toEqual(['color.background']);
+    // Previewing writes nothing.
+    expect((await getProject(db, editor, p.id)).designSystemId).toBe(def!.id);
     await setDesignSystemToken(db, editor, brand.id, 'color.background', {
       type: 'color',
       value: '#222222',
     });
     const r = await switchProjectDesignSystem(db, editor, p.id, { designSystemId: brand.id });
-    expect(r).toMatchObject({ id: brand.id, version: 1, pinned: true });
+    expect(r).toMatchObject({ id: brand.id, version: 2, pinned: true });
     const resolved = await resolveProjectDesignSystem(
       db,
       editor,
@@ -108,9 +113,20 @@ describe('switching a project between systems', () => {
     );
     expect(resolved.spec.tokens['color.background']!.value).toBe('#000000');
 
-    // Back to the default system's draft (it was never published).
+    // Switching always pins a real version, never a draft.
     const back = await switchProjectDesignSystem(db, editor, p.id, { designSystemId: def!.id });
-    expect(back).toMatchObject({ id: def!.id, version: null, pinned: false });
+    expect(back).toMatchObject({ id: def!.id, version: 1, pinned: true });
+    await setDesignSystemToken(db, editor, def!.id, 'color.background', {
+      type: 'color',
+      value: '#333333',
+    });
+    const after = await resolveProjectDesignSystem(db, editor, await getProject(db, editor, p.id));
+    expect(after.spec.tokens['color.background']!.value).toBe('#ffffff');
+    const v1 = await switchProjectDesignSystem(db, editor, p.id, {
+      designSystemId: brand.id,
+      version: 1,
+    });
+    expect(v1).toMatchObject({ version: 1, pinned: true });
     await expect(
       switchProjectDesignSystem(db, editor, p.id, { designSystemId: brand.id, version: 5 }),
     ).rejects.toBeInstanceOf(NotFoundError);

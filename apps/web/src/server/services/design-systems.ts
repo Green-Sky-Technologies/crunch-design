@@ -215,6 +215,74 @@ async function summarize(conn: Conn, rows: DesignSystem[]): Promise<DesignSystem
 // reads
 // ---------------------------------------------------------------------------------------------
 
+/** publishedBy for versions created by the system rather than a person. */
+export const SYSTEM_PUBLISHER = 'system';
+
+async function insertFirstVersion(
+  tx: Tx,
+  row: DesignSystem,
+  spec: DesignSystemSpec,
+  publishedBy: string,
+): Promise<DesignSystem> {
+  const [v] = await tx
+    .insert(designSystemVersions)
+    .values({
+      designSystemId: row.id,
+      workspaceId: row.workspaceId,
+      version: 1,
+      spec,
+      notes: 'Initial version',
+      publishedBy,
+    })
+    .returning({ id: designSystemVersions.id });
+  const [updated] = await tx
+    .update(designSystems)
+    .set({ latestVersion: 1, draft: spec, updatedAt: KEEP_UPDATED_AT })
+    .where(eq(designSystems.id, row.id))
+    .returning();
+  // Projects that were following the (never published) system now pin v1, which is exactly what
+  // they rendered before.
+  await tx
+    .update(projects)
+    .set({ designSystemVersionId: v!.id })
+    .where(and(eq(projects.designSystemId, row.id), isNull(projects.designSystemVersionId)));
+  return updated!;
+}
+
+/**
+ * Projects never render a mutable draft (Story 4.2), so every system needs a published version.
+ * New systems get v1 on create; systems created elsewhere (the workspace default made by
+ * upsertWorkspace, legacy rows) get it here on first access. Idempotent and race-safe: the row is
+ * locked and latestVersion re-checked before inserting. Returns the (possibly updated) row, or null
+ * if it isn't in the workspace.
+ */
+export async function ensurePublished(
+  db: Db,
+  workspaceId: string,
+  id: string,
+  publishedBy = SYSTEM_PUBLISHER,
+): Promise<DesignSystem | null> {
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .select()
+      .from(designSystems)
+      .where(and(eq(designSystems.id, id), eq(designSystems.workspaceId, workspaceId)))
+      .limit(1)
+      .for('update');
+    if (!row || row.latestVersion !== null) return row ?? null;
+    const draft = safeParseSpec(row.draft ?? starterDesignSystem());
+    return insertFirstVersion(tx, row, draft.ok ? draft.spec : starterDesignSystem(), publishedBy);
+  });
+}
+
+async function ensureAllPublished(db: Db, rows: DesignSystem[]): Promise<DesignSystem[]> {
+  return Promise.all(
+    rows.map(async (r) =>
+      r.latestVersion === null ? ((await ensurePublished(db, r.workspaceId, r.id)) ?? r) : r,
+    ),
+  );
+}
+
 export async function listDesignSystems(db: Db, actor: Actor): Promise<DesignSystemSummary[]> {
   assertCan(actor.role, 'design_system:read');
   const rows = await db
@@ -222,7 +290,7 @@ export async function listDesignSystems(db: Db, actor: Actor): Promise<DesignSys
     .from(designSystems)
     .where(and(eq(designSystems.workspaceId, actor.workspace.id), isNull(designSystems.archivedAt)))
     .orderBy(desc(designSystems.isDefault), asc(designSystems.name), asc(designSystems.createdAt));
-  return summarize(db, rows);
+  return summarize(db, await ensureAllPublished(db, rows));
 }
 
 export async function getDesignSystem(
@@ -231,12 +299,12 @@ export async function getDesignSystem(
   id: string,
 ): Promise<DesignSystemDetail> {
   assertCan(actor.role, 'design_system:read');
-  const row = await loadRow(db, actor, id);
-  const [system] = await summarize(db, [row]);
+  const [row] = await ensureAllPublished(db, [await loadRow(db, actor, id)]);
+  const [system] = await summarize(db, [row!]);
   return {
     system: system!,
-    draft: draftSpecOf(row),
-    versions: await listVersionsFor(db, row.id),
+    draft: draftSpecOf(row!),
+    versions: await listVersionsFor(db, row!.id),
   };
 }
 
@@ -305,17 +373,22 @@ export async function createDesignSystem(
       spec = v;
     }
   }
-  const [row] = await db
-    .insert(designSystems)
-    .values({
-      workspaceId: actor.workspace.id,
-      name,
-      description,
-      draft: validateSpecOrThrow(spec),
-      updatedBy: actor.userId,
-    })
-    .returning();
-  return (await summarize(db, [row!]))[0]!;
+  const valid = validateSpecOrThrow(spec);
+  // The system and its v1 are created together, so no project can ever render its draft.
+  const row = await db.transaction(async (tx) => {
+    const [created] = await tx
+      .insert(designSystems)
+      .values({
+        workspaceId: actor.workspace.id,
+        name,
+        description,
+        draft: valid,
+        updatedBy: actor.userId,
+      })
+      .returning();
+    return insertFirstVersion(tx, created!, valid, actor.userId);
+  });
+  return (await summarize(db, [row]))[0]!;
 }
 
 export async function updateDesignSystemDetails(
