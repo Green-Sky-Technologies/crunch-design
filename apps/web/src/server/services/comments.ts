@@ -12,6 +12,7 @@
  */
 import { assertCan } from '@crunch/authz';
 import {
+  agentConversations,
   and,
   asc,
   commentThreads,
@@ -22,6 +23,7 @@ import {
   isNull,
   members,
   notifications,
+  projects,
   users,
   type CommentRow,
   type CommentThreadRow,
@@ -188,6 +190,25 @@ async function getThreadRow(db: Db, actor: Actor, threadId: string): Promise<Com
   return row;
 }
 
+export const ARCHIVED_MESSAGE = 'This project is archived. Restore it to comment.';
+
+/** A thread the caller may change: in their workspace and in a project that isn't archived. */
+async function getMutableThreadRow(
+  db: Db,
+  actor: Actor,
+  threadId: string,
+): Promise<CommentThreadRow> {
+  const row = await getThreadRow(db, actor, threadId);
+  const [p] = await db
+    .select({ archivedAt: projects.archivedAt })
+    .from(projects)
+    .where(and(eq(projects.id, row.projectId), eq(projects.workspaceId, actor.workspace.id)))
+    .limit(1);
+  if (!p) throw new NotFoundError('Thread not found');
+  if (p.archivedAt) throw new ValidationError(ARCHIVED_MESSAGE);
+  return row;
+}
+
 async function hydrate(db: Db, threads: CommentThreadRow[], doc: DesignDoc): Promise<ThreadView[]> {
   if (!threads.length) return [];
   const rows = await db
@@ -286,6 +307,7 @@ export async function createThread(db: Db, actor: Actor, input: unknown): Promis
   const data = parse(createThreadInput, input);
   if (data.kind === 'agent_request') assertCan(actor.role, 'agent:run');
   const project = await getProject(db, actor, data.projectId);
+  if (project.archivedAt) throw new ValidationError(ARCHIVED_MESSAGE);
   const { doc } = await getDoc(db, actor, project.id);
 
   let fallback: CanvasPoint;
@@ -352,7 +374,7 @@ export async function replyToThread(
 ): Promise<ThreadView> {
   assertCan(actor.role, 'design:comment');
   const data = parse(replyInput, input);
-  const thread = await getThreadRow(db, actor, threadId);
+  const thread = await getMutableThreadRow(db, actor, threadId);
   const mentions = await validMentions(db, actor, data.mentions);
   const [comment] = await db
     .insert(comments)
@@ -393,7 +415,7 @@ export async function setThreadStatus(
 ): Promise<ThreadView> {
   assertCan(actor.role, 'design:comment');
   const s = parse(z.enum(['open', 'resolved']), status);
-  const thread = await getThreadRow(db, actor, threadId);
+  const thread = await getMutableThreadRow(db, actor, threadId);
   if (thread.status !== s) {
     await db
       .update(commentThreads)
@@ -422,7 +444,7 @@ export async function updateThreadFallback(
 ): Promise<void> {
   assertCan(actor.role, 'design:comment');
   const p = parse(point, fallback);
-  const thread = await getThreadRow(db, actor, threadId);
+  const thread = await getMutableThreadRow(db, actor, threadId);
   await db.update(commentThreads).set({ fallback: p }).where(eq(commentThreads.id, thread.id));
 }
 
@@ -436,9 +458,22 @@ export async function linkAgentConversation(
   assertCan(actor.role, 'design:comment');
   assertCan(actor.role, 'agent:run');
   const cid = parse(z.uuid(), conversationId);
-  const thread = await getThreadRow(db, actor, threadId);
+  const thread = await getMutableThreadRow(db, actor, threadId);
   if (thread.kind !== 'agent_request')
     throw new ValidationError('Only ask-agent threads can link a conversation');
+  // The conversation must exist in this workspace and belong to the thread's project.
+  const [conv] = await db
+    .select({ id: agentConversations.id })
+    .from(agentConversations)
+    .where(
+      and(
+        eq(agentConversations.id, cid),
+        eq(agentConversations.workspaceId, actor.workspace.id),
+        eq(agentConversations.projectId, thread.projectId),
+      ),
+    )
+    .limit(1);
+  if (!conv) throw new NotFoundError('Conversation not found');
   await db
     .update(commentThreads)
     .set({ agentConversationId: cid })

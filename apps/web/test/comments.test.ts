@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { ForbiddenError } from '@crunch/authz';
-import { activity, eq, notifications } from '@crunch/db';
+import { activity, agentConversations, eq, notifications, projects } from '@crunch/db';
 import { newId, type DocOp } from '@crunch/doc-model';
 import {
   createThread,
@@ -298,7 +298,14 @@ describe('comment threads', () => {
       kind: 'agent_request',
     });
     expect(ask.kind).toBe('agent_request');
-    const cid = crypto.randomUUID();
+    const conversation = async (a: Actor, projectId: string) =>
+      (
+        await db
+          .insert(agentConversations)
+          .values({ workspaceId: a.workspace.id, projectId, createdBy: a.userId })
+          .returning({ id: agentConversations.id })
+      )[0]!.id;
+    const cid = await conversation(editor, project.id);
     expect((await linkAgentConversation(db, editor, ask.id, cid)).agentConversationId).toBe(cid);
     await expect(linkAgentConversation(db, editor, discussion.id, cid)).rejects.toBeInstanceOf(
       ValidationError,
@@ -306,6 +313,70 @@ describe('comment threads', () => {
     await expect(linkAgentConversation(db, editor, ask.id, 'nope')).rejects.toBeInstanceOf(
       ValidationError,
     );
+  });
+
+  it('only links conversations that exist in the same workspace and project', async () => {
+    const { editor, project, frameId } = await setup();
+    const ask = await createThread(db, editor, {
+      projectId: project.id,
+      anchor: nodeAnchor(frameId),
+      body: 'Wider',
+      kind: 'agent_request',
+    });
+    // Unknown id.
+    await expect(
+      linkAgentConversation(db, editor, ask.id, crypto.randomUUID()),
+    ).rejects.toBeInstanceOf(NotFoundError);
+    // A conversation of another project in the same workspace.
+    const other = await createProject(db, editor, { name: 'Other' });
+    const [otherConv] = await db
+      .insert(agentConversations)
+      .values({ workspaceId: editor.workspace.id, projectId: other.id, createdBy: editor.userId })
+      .returning();
+    await expect(linkAgentConversation(db, editor, ask.id, otherConv!.id)).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
+    // A conversation from another workspace.
+    const outsider = await makeActor(db, 'editor');
+    const foreignProject = await createProject(db, outsider, { name: 'F' });
+    const [foreign] = await db
+      .insert(agentConversations)
+      .values({
+        workspaceId: outsider.workspace.id,
+        projectId: foreignProject.id,
+        createdBy: outsider.userId,
+      })
+      .returning();
+    await expect(linkAgentConversation(db, editor, ask.id, foreign!.id)).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
+    const [after] = await listThreads(db, editor, project.id);
+    expect(after!.agentConversationId).toBeNull();
+  });
+
+  it('blocks comment changes (and mention notifications) in archived projects', async () => {
+    const { editor, viewer, project, frameId } = await setup();
+    const t = await createThread(db, editor, {
+      projectId: project.id,
+      anchor: nodeAnchor(frameId),
+      body: 'Before archiving',
+      kind: 'agent_request',
+    });
+    await db.update(projects).set({ archivedAt: new Date() }).where(eq(projects.id, project.id));
+
+    const archived = (p: Promise<unknown>) => expect(p).rejects.toBeInstanceOf(ValidationError);
+    await archived(
+      createThread(db, editor, { projectId: project.id, anchor: nodeAnchor(frameId), body: 'x' }),
+    );
+    await archived(replyToThread(db, editor, t.id, { body: '@v', mentions: [viewer.userId] }));
+    await archived(setThreadStatus(db, editor, t.id, 'resolved'));
+    await archived(updateThreadFallback(db, editor, t.id, { x: 1, y: 1 }));
+    await archived(linkAgentConversation(db, editor, t.id, crypto.randomUUID()));
+    expect(await listNotifications(db, viewer)).toHaveLength(0);
+    // Reading still works.
+    const [still] = await listThreads(db, viewer, project.id);
+    expect(still!.status).toBe('open');
+    expect(still!.comments).toHaveLength(1);
   });
 
   it('updates the remembered fallback position', async () => {
