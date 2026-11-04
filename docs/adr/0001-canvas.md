@@ -140,3 +140,27 @@ own serial Playwright projects. Two fixes were needed:
 No long tasks over 50ms were observed during a drag (Chromium Long Tasks API). Headless WebKit
 (30Hz, 2x device scale) reports ~80ms, quantized to its rendering opportunities, and is held to a
 looser regression guard.
+
+What the automated checks measure (see the header of `perf.spec.ts`):
+
+- **First interactive frame**: from `cd:load` (the doc is in memory and React starts rendering
+  the editor) to the later of the first frame's content being laid out and the canvas input
+  handlers being attached. Time from navigation start is logged alongside; it adds network,
+  bundle download and parse, which belong to the deployment, not the canvas.
+- **Long tasks during drag**: at the 3.0 benchmark size (20 frames × ~300 nodes, 6,000 nodes).
+- **Inspector edit**: a real selection with the inspector mounted; the value is committed through
+  the inspector's own input; median and p95 must both stay under 16ms of main-thread work.
+
+### Manual check before release: 60fps pan/zoom on real hardware
+
+Headless browsers cap or throttle rAF, so the 3.1 AC (60fps at the benchmark size on a mid-range
+laptop) needs a person:
+
+1. Run the harness locally (`node apps/web/e2e/canvas/harness/server.mjs`, which prints a
+   `?fixture=bench20` URL) or open a project
+   with 20 frames in the app, on a mid-range laptop (for example an M1/M2 MacBook Air, or an
+   8th-gen Intel i5 with integrated graphics) in Chrome, Firefox and Safari.
+2. Open DevTools > Performance (Safari: Timelines > Rendering Frames), start recording, then
+   pan with the trackpad and pinch-zoom continuously for about 10 seconds across all frames.
+3. Pass: the frame chart stays at 60fps with no dropped-frame runs longer than a few frames, and
+   no main-thread task over 16ms is attributed to the canvas camera.

@@ -1,11 +1,19 @@
 /**
- * Performance budget (Story 3.10), on the benchmark project (10 frames of ~300 nodes):
- * - under 100ms from project load (doc in memory, React starts rendering) to the first
- *   interactive frame (content laid out and canvas input handlers attached);
- * - no long tasks over 50ms while dragging (Long Tasks API: Chromium only);
- * - an inspector edit applies in under 16ms of main-thread work (3.3): op, React commit and layout.
- * Numbers are logged so regressions are visible even when within budget.
- * Runs only in the `*-perf` projects of e2e/canvas/playwright.config.ts (serial, unloaded).
+ * Performance budget (Story 3.10). Runs only in the serial `*-perf` projects of
+ * e2e/canvas/playwright.config.ts (one worker at a time, after the functional suite).
+ *
+ * What each check measures, precisely:
+ * - First interactive frame (10 frames × ~300 nodes): from `cd:load` (the project's doc is in
+ *   memory and React starts rendering the editor; in the app that's hydration of the editor page
+ *   with the server-fetched doc) to the later of `cd:first-frame` (first frame's content laid
+ *   out) and `cd:canvas-interactive` (canvas input handlers attached). Budget: 100ms. Time from
+ *   navigation start is logged too (it adds network, bundle download and parse, which depend on
+ *   deployment, not the canvas).
+ * - Long tasks during a drag at the Story 3.0 benchmark size (20 frames × ~300 nodes): no task
+ *   over 50ms (Long Tasks API, Chromium only).
+ * - Inspector edit (3.3, under 16ms per edit): a real selection with the inspector mounted; each
+ *   sample commits a value through the inspector's own input and measures main-thread time until
+ *   React has re-rendered (inspector, layers, the frame) and layout is clean. Median and p95.
  */
 import { expect, test } from './fixtures';
 
@@ -15,6 +23,12 @@ test.beforeEach(({}, info) => {
     'Timing budgets run in the serial *-perf projects',
   );
 });
+
+/** Runs in the page (serialized), so the frame count is an argument, not a closure. */
+const allFramesMounted = (n: number) =>
+  [...document.querySelectorAll('[data-cd-frame-host]')].filter((h) =>
+    h.shadowRoot?.querySelector('[data-cd-id]'),
+  ).length === n;
 
 test.describe('canvas performance budget', () => {
   test('first interactive frame under 100ms on a 10-frame project', async ({
@@ -26,43 +40,29 @@ test.describe('canvas performance budget', () => {
     const t = await page.evaluate(() => {
       const at = (n: string) => performance.getEntriesByName(n)[0]?.startTime ?? NaN;
       const load = at('cd:load');
-      return {
-        firstFrame: at('cd:first-frame') - load,
-        interactive: Math.max(at('cd:first-frame'), at('cd:canvas-interactive')) - load,
-      };
+      const ready = Math.max(at('cd:first-frame'), at('cd:canvas-interactive'));
+      return { interactive: ready - load, fromNavigation: ready, loadAt: load };
     });
     console.log(
-      `[perf:${browserName}] first frame ${t.firstFrame.toFixed(1)}ms, interactive ${t.interactive.toFixed(1)}ms`,
+      `[perf:${browserName}] interactive ${t.interactive.toFixed(1)}ms after load ` +
+        `(${t.fromNavigation.toFixed(1)}ms from navigation start; doc loaded at ${t.loadAt.toFixed(1)}ms)`,
     );
     expect(t.interactive).toBeGreaterThan(0);
-    // The 100ms budget is enforced in Chromium and Firefox. Headless WebKit renders at 30Hz with
-    // the "Desktop Safari" 2x device scale and only delivers the measurement at a rendering
-    // opportunity, so its number is quantized upwards (≈80ms standalone at 1x); it gets a looser
-    // regression guard instead of the budget.
+    // Enforced in Chromium and Firefox. Headless WebKit renders at 30Hz with the "Desktop Safari"
+    // 2x device scale and reports at its next rendering opportunity (≈80ms standalone at 1x), so
+    // it gets a looser regression guard.
     expect(t.interactive).toBeLessThan(browserName === 'webkit' ? 200 : 100);
-    // and every frame does mount eventually
-    await expect
-      .poll(() =>
-        page.evaluate(
-          () =>
-            [...document.querySelectorAll('[data-cd-frame-host]')].filter((h) =>
-              h.shadowRoot?.querySelector('[data-cd-id]'),
-            ).length,
-        ),
-      )
-      .toBe(10);
+    await page.waitForFunction(allFramesMounted, 10);
   });
 
-  test('no long tasks over 50ms during a drag', async ({ canvas, page, browserName }) => {
+  test('no long tasks over 50ms during a drag at the 3.0 benchmark size (20 frames)', async ({
+    canvas,
+    page,
+    browserName,
+  }) => {
     test.skip(browserName !== 'chromium', 'The Long Tasks API is Chromium-only');
-    await canvas.open('fixture=bench10');
-    // wait for progressive mounting to finish so it doesn't count against the drag
-    await page.waitForFunction(
-      () =>
-        [...document.querySelectorAll('[data-cd-frame-host]')].filter((h) =>
-          h.shadowRoot?.querySelector('[data-cd-id]'),
-        ).length === 10,
-    );
+    await canvas.open('fixture=bench20');
+    await page.waitForFunction(allFramesMounted, 20, { timeout: 20_000 });
     await page.evaluate(() => {
       const w = window as unknown as { __long: number[] };
       w.__long = [];
@@ -91,9 +91,8 @@ test.describe('canvas performance budget', () => {
     const long = await page.evaluate(() => (window as unknown as { __long: number[] }).__long);
     const doc = await canvas.doc();
     console.log(
-      `[perf:${browserName}] long tasks during drag: ${JSON.stringify(long.map((d) => Math.round(d)))}`,
+      `[perf:${browserName}] 20 frames, ${Object.keys(doc.nodes).length} nodes; long tasks during drag: ${JSON.stringify(long.map((d) => Math.round(d)))}`,
     );
-    // card 1 now sits between cards 2 and 3
     expect(doc.nodes['n_b000000003']!.children.slice(0, 3)).toEqual([
       'n_b000000009',
       'n_b000000004',
@@ -102,16 +101,22 @@ test.describe('canvas performance budget', () => {
     expect(long.filter((d) => d > 50)).toEqual([]);
   });
 
-  test('an inspector edit costs under 16ms of main-thread work', async ({
+  test('an inspector edit costs under 16ms (median and p95) with the inspector mounted', async ({
     canvas,
     page,
     browserName,
   }) => {
     await canvas.open('fixture=bench10');
+    await page.waitForFunction(allFramesMounted, 10);
+    // A real selection, so the inspector shows the node's fields and re-renders on each edit.
+    await page.evaluate(() =>
+      window.__cd.store.getState().select({ frameId: 'f_bench00000', nodeIds: ['n_b000000005'] }),
+    );
+    await page.locator('[data-prop="letterSpacing"] input').waitFor();
     const ms = await page.evaluate(async () => {
-      const s = window.__cd.store.getState();
-      const id = 'n_b000000005'; // a card title in the first frame
+      const input = document.querySelector<HTMLInputElement>('[data-prop="letterSpacing"] input')!;
       const host = document.querySelector('[data-cd-frame-host="f_bench00000"]')!;
+      const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
       const macrotask = () =>
         new Promise<void>((r) => {
           const c = new MessageChannel();
@@ -119,25 +124,28 @@ test.describe('canvas performance budget', () => {
           c.port2.postMessage(0);
         });
       const samples: number[] = [];
-      for (let i = 0; i < 12; i++) {
-        await new Promise((r) => requestAnimationFrame(() => r(undefined))); // start idle
+      for (let i = 1; i <= 20; i++) {
+        await new Promise((r) => requestAnimationFrame(() => r(undefined)));
+        input.focus();
+        setValue.call(input, String(i));
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        await macrotask(); // the draft render isn't part of the edit
         const t0 = performance.now();
-        s.apply([{ op: 'setStyle', id, breakpoint: 'lg', prop: 'letterSpacing', value: i }], {
-          source: 'inspector',
-          coalesceKey: 'perf',
-        });
-        // React flushes the store update (and the frame's node re-render) before the next task.
+        input.blur(); // the inspector commits the value: one setStyle op
         await macrotask();
-        // Include the style/layout the edit causes.
-        host.shadowRoot!.querySelector(`[data-cd-id="${id}"]`)!.getBoundingClientRect();
+        host.shadowRoot!.querySelector('[data-cd-id="n_b000000005"]')!.getBoundingClientRect();
         samples.push(performance.now() - t0);
       }
       samples.sort((a, b) => a - b);
-      return { median: samples[6]!, max: samples[11]! };
+      const applied =
+        window.__cd.store.getState().doc.nodes['n_b000000005']!.style.lg?.letterSpacing;
+      return { median: samples[10]!, p95: samples[18]!, max: samples[19]!, applied };
     });
     console.log(
-      `[perf:${browserName}] inspector edit median ${ms.median.toFixed(1)}ms max ${ms.max.toFixed(1)}ms (main thread)`,
+      `[perf:${browserName}] inspector edit median ${ms.median.toFixed(1)}ms p95 ${ms.p95.toFixed(1)}ms max ${ms.max.toFixed(1)}ms`,
     );
+    expect(ms.applied).toBe(20);
     expect(ms.median).toBeLessThan(16);
+    expect(ms.p95).toBeLessThan(16);
   });
 });

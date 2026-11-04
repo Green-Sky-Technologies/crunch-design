@@ -77,3 +77,9 @@ export async function startHarness() {
   const { port } = server.address();
   return { url: `http://127.0.0.1:${port}`, close: () => new Promise((r) => server.close(r)) };
 }
+
+// Manual use (ADR 0001 real-hardware check): `node apps/web/e2e/canvas/harness/server.mjs`
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  const h = await startHarness();
+  console.log(`Canvas harness: ${h.url}/?fixture=bench20  (Ctrl+C to stop)`);
+}

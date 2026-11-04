@@ -4,7 +4,7 @@
  * drive the editor in Chromium, Firefox and WebKit without a Clerk session. Auth isn't weakened:
  * this page is bundled by the test runner and never served by the app.
  *
- * Query params: fixture=sample|empty|bench10, role=editor|viewer|admin, user=<id>, lock=other
+ * Query params: fixture=sample|empty|bench<N> (N frames of ~300 nodes), role=editor|viewer|admin, user=<id>, lock=other
  */
 import { permissionsFor, type Role } from '@crunch/authz';
 import {
@@ -32,7 +32,11 @@ const params = new URLSearchParams(location.search);
 const role = (params.get('role') ?? 'editor') as Role;
 const fixture = params.get('fixture') ?? 'sample';
 const initial: DesignDoc =
-  fixture === 'empty' ? initialDoc() : fixture === 'bench10' ? benchDoc(10) : sampleLandingDoc();
+  fixture === 'empty'
+    ? initialDoc()
+    : fixture.startsWith('bench')
+      ? benchDoc(Number(fixture.slice(5)) || 10)
+      : sampleLandingDoc();
 
 // Lock server: free by default; `lock=other` simulates a teammate holding the edit lock.
 const bob = { userId: 'user_bob', name: 'Bob Builder', imageUrl: null };
