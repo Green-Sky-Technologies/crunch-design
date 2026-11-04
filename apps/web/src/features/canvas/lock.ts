@@ -147,7 +147,10 @@ function controllerFor(docStore: DocStore, projectId: string, canEdit: boolean):
     request: guard(async () => sync(await lockApi.request(projectId, sid()))),
     decline: guard(async () => sync(await lockApi.decline(projectId, sid()))),
     handOver: guard(async () => {
-      await docStore.getState().flush(); // nothing of ours is lost in the hand-over
+      // Nothing of ours is lost in the hand-over: this tab flushes, and the user's other tabs
+      // flush and go read-only before the lock moves.
+      await docStore.getState().flush();
+      await freezeOtherTabs(projectId, sid());
       const st = await lockApi.release(projectId, sid(), { handoff: true });
       if (st) await sync(st);
     }),
@@ -157,6 +160,27 @@ function controllerFor(docStore: DocStore, projectId: string, canEdit: boolean):
   // Expose the internal steps to the hook below.
   internals.set(c, { sync, acquire });
   return c;
+}
+
+/** Same-user tab coordination for hand-over (BroadcastChannel, same origin only). */
+const channelName = (projectId: string) => `cd-lock:${projectId}`;
+type TabMsg = { type: 'freeze'; from: string } | { type: 'frozen'; to: string };
+
+/** Ask this user's other tabs to flush and go read-only; resolves once they ack (or 800ms pass). */
+export async function freezeOtherTabs(projectId: string, sessionId: string): Promise<void> {
+  if (typeof BroadcastChannel === 'undefined') return;
+  const ch = new BroadcastChannel(channelName(projectId));
+  await new Promise<void>((resolve) => {
+    let quiet: ReturnType<typeof setTimeout> = setTimeout(resolve, 800);
+    ch.onmessage = (e: MessageEvent<TabMsg>) => {
+      if (e.data.type === 'frozen' && e.data.to === sessionId) {
+        clearTimeout(quiet);
+        quiet = setTimeout(resolve, 100); // give any other tabs a moment to ack too
+      }
+    };
+    ch.postMessage({ type: 'freeze', from: sessionId } satisfies TabMsg);
+  });
+  ch.close();
 }
 
 const internals = new WeakMap<
@@ -185,10 +209,24 @@ export function useEditLockLoop() {
         c.store.setState({ offline: true });
       }
       if (stopped) return;
-      const holder = c.store.getState().state?.lock?.isThisSession;
+      const holder = c.store.getState().state?.lock?.isMine;
       timer = setTimeout(() => void tick(), holder ? HOLDER_HEARTBEAT_MS : WAITING_POLL_MS);
     };
     void tick(true);
+
+    // Another tab of this user is handing the lock over: save and stop editing here first.
+    const ch =
+      typeof BroadcastChannel !== 'undefined'
+        ? new BroadcastChannel(channelName(project.id))
+        : null;
+    if (ch)
+      ch.onmessage = async (e: MessageEvent<TabMsg>) => {
+        if (e.data.type !== 'freeze' || e.data.from === sid) return;
+        const s = docStore.getState();
+        if (s.queue.length) await s.flush();
+        docStore.getState().setReadOnly(true, 'locked');
+        ch.postMessage({ type: 'frozen', to: e.data.from } satisfies TabMsg);
+      };
 
     const leave = () => {
       void lockApi.release(project.id, sid, { leave: true, keepalive: true }).catch(() => {});
@@ -197,6 +235,7 @@ export function useEditLockLoop() {
     return () => {
       stopped = true;
       if (timer) clearTimeout(timer);
+      ch?.close();
       window.removeEventListener('pagehide', leave);
       leave();
     };

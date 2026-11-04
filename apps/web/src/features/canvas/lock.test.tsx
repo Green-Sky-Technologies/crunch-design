@@ -175,11 +175,30 @@ describe('edit lock UI (Story 3.8)', () => {
       await vi.advanceTimersByTimeAsync(20_100);
     });
     fireEvent.click(screen.getByRole('button', { name: 'Hand over' }));
-    await flush();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000); // past the other-tab freeze wait
+    });
     expect(server.api.release).toHaveBeenCalledWith(expect.any(String), expect.any(String), {
       handoff: true,
     });
     expect(store().getState()).toMatchObject({ readOnly: true, readOnlyReason: 'locked' });
+  });
+
+  it('another tab of the same user handing over makes this tab flush and go read-only', async () => {
+    const server = fakeApi({ holder: null });
+    const { store } = setup(server);
+    await flush();
+    expect(store().getState().readOnly).toBe(false);
+    const other = new BroadcastChannel('cd-lock:00000000-0000-4000-8000-000000000001');
+    const acks: unknown[] = [];
+    other.onmessage = (e) => acks.push(e.data);
+    other.postMessage({ type: 'freeze', from: 'other-tab-session' });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(50);
+    });
+    expect(store().getState()).toMatchObject({ readOnly: true, readOnlyReason: 'locked' });
+    expect(acks).toEqual([{ type: 'frozen', to: 'other-tab-session' }]);
+    other.close();
   });
 
   it('viewers only heartbeat presence and see View only', async () => {

@@ -13,6 +13,7 @@ import {
   takeOver,
 } from '@/server/services/locks';
 import { createProject } from '@/server/services/projects';
+import { upsertMember } from '@/server/services/workspaces';
 import { NotFoundError, ValidationError } from '@/server/services/types';
 import { makeActor, reset, testDb } from './helpers';
 
@@ -30,6 +31,8 @@ async function setup() {
   const admin = await makeActor(db, 'admin', alice.workspace);
   const viewer = await makeActor(db, 'viewer', alice.workspace);
   const project = await createProject(db, alice, { name: 'P' });
+  for (const a of [alice, bob, admin, viewer])
+    await upsertMember(db, a.workspace.id, a.userId, a.role);
   return { alice, bob, admin, viewer, project };
 }
 
@@ -129,7 +132,47 @@ describe('edit lock (Story 3.8)', () => {
     await requestControl(db, bob, project.id, { sessionId: S2 });
     await releaseLock(db, alice, project.id, { sessionId: S1, handoff: true });
     const s = await heartbeat(db, bob, project.id, { sessionId: S2 });
-    expect(s.lock).toMatchObject({ isMine: true, isThisSession: true, requestedBy: null });
+    expect(s.lock).toMatchObject({
+      isMine: true,
+      holder: { userId: bob.userId },
+      requestedBy: null,
+    });
+  });
+
+  it('two tabs of the same user: closing either keeps the lock while the other is open', async () => {
+    const { alice, bob, project } = await setup();
+    await acquireLock(db, alice, project.id, { sessionId: S1 }); // tab 1
+    await acquireLock(db, alice, project.id, { sessionId: S3 }); // tab 2 (same user)
+    // interleaved heartbeats: tab 1 beats last
+    await heartbeat(db, alice, project.id, { sessionId: S3 });
+    await heartbeat(db, alice, project.id, { sessionId: S1 });
+    // tab 1 closes: tab 2 is still open, so the lock stays and bob can't grab it
+    await releaseLock(db, alice, project.id, { sessionId: S1, leave: true });
+    expect((await acquireLock(db, bob, project.id, { sessionId: S2 })).acquired).toBe(false);
+    // tab 2 keeps heartbeating the lock
+    expect((await heartbeat(db, alice, project.id, { sessionId: S3 })).lock?.isMine).toBe(true);
+    // the other order: tab 2 closes last, and only then is the lock free
+    await releaseLock(db, alice, project.id, { sessionId: S3, leave: true });
+    expect((await acquireLock(db, bob, project.id, { sessionId: S2 })).acquired).toBe(true);
+  });
+
+  it('hand-over only goes to a requester who is still an editor with a live tab', async () => {
+    const { alice, bob, project } = await setup();
+    await acquireLock(db, alice, project.id, { sessionId: S1 });
+    await requestControl(db, bob, project.id, { sessionId: S2 });
+    // bob's tab died: his presence is stale
+    await db
+      .update(presence)
+      .set({ lastSeenAt: new Date(Date.now() - 60_000) })
+      .where(eq(presence.sessionId, S2));
+    let s = await releaseLock(db, alice, project.id, { sessionId: S1, handoff: true });
+    expect(s.lock).toMatchObject({ isMine: true, requestedBy: null });
+
+    // bob is back but was demoted to viewer
+    await requestControl(db, bob, project.id, { sessionId: S2 });
+    await upsertMember(db, bob.workspace.id, bob.userId, 'viewer');
+    s = await releaseLock(db, alice, project.id, { sessionId: S1, handoff: true });
+    expect(s.lock).toMatchObject({ isMine: true, requestedBy: null });
   });
 
   it('admins can take over; editors cannot', async () => {

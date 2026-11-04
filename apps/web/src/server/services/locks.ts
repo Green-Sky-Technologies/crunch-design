@@ -18,6 +18,7 @@ import {
   eq,
   gt,
   inArray,
+  members,
   notifications,
   presence,
   sql,
@@ -196,9 +197,11 @@ export async function heartbeat(
   await getProject(db, actor, projectId);
   await touchPresence(db, actor, projectId, sessionId);
   if (actor.role !== 'viewer') {
+    // The lock belongs to the user, not a tab: don't rewrite sessionId (live tabs are tracked in
+    // presence), or the tab that beat last would decide whether closing another tab drops it.
     await db
       .update(editLocks)
-      .set({ heartbeatAt: new Date(), sessionId })
+      .set({ heartbeatAt: new Date() })
       .where(
         and(
           eq(editLocks.projectId, projectId),
@@ -230,34 +233,61 @@ export async function releaseLock(
   }
   const mine = and(eq(editLocks.projectId, projectId), eq(editLocks.holderUserId, actor.userId));
   if (input.handoff) {
-    const [lock] = await db.select().from(editLocks).where(mine).limit(1);
-    if (lock?.requestedBy) {
-      const now = new Date();
-      await db
-        .update(editLocks)
-        .set({
-          holderUserId: lock.requestedBy,
-          sessionId: `handoff-${now.getTime()}`,
-          acquiredAt: now,
-          heartbeatAt: now,
-          requestedBy: null,
-          requestedAt: null,
-        })
-        .where(mine);
+    // One statement: move the lock to the requester only if they're still an editor in this
+    // workspace with a live tab on the project. Otherwise the stale request is dropped and the
+    // holder keeps the lock.
+    const now = new Date();
+    const live = new Date(Date.now() - PRESENCE_TTL_MS);
+    const [moved] = await db
+      .update(editLocks)
+      .set({
+        holderUserId: sql`${editLocks.requestedBy}`,
+        sessionId: `handoff-${now.getTime()}`,
+        acquiredAt: now,
+        heartbeatAt: now,
+        requestedBy: null,
+        requestedAt: null,
+      })
+      .where(
+        and(
+          mine,
+          sql`${editLocks.requestedBy} is not null`,
+          sql`exists (select 1 from ${members} where ${members.workspaceId} = ${actor.workspace.id}
+                and ${members.userId} = ${editLocks.requestedBy} and ${members.role} <> 'viewer')`,
+          sql`exists (select 1 from ${presence} where ${presence.projectId} = ${projectId}
+                and ${presence.userId} = ${editLocks.requestedBy} and ${presence.lastSeenAt} > ${live})`,
+        ),
+      )
+      .returning({ holder: editLocks.holderUserId });
+    if (moved) {
       await db.insert(notifications).values({
         workspaceId: actor.workspace.id,
-        userId: lock.requestedBy,
+        userId: moved.holder,
         kind: 'control_granted',
         projectId,
         data: { from: actor.userId },
       });
-      return readState(db, actor, projectId, sessionId);
+    } else {
+      await db.update(editLocks).set({ requestedBy: null, requestedAt: null }).where(mine);
     }
+    return readState(db, actor, projectId, sessionId);
   }
-  // Only the tab that holds the lock releases it on close (other tabs of the same user keep it).
-  await db
-    .delete(editLocks)
-    .where(input.leave ? and(mine, eq(editLocks.sessionId, sessionId)) : mine);
+  if (input.leave) {
+    // A closing tab only frees the lock if no other live tab of the same user is still open.
+    const [other] = await db
+      .select({ s: presence.sessionId })
+      .from(presence)
+      .where(
+        and(
+          eq(presence.projectId, projectId),
+          eq(presence.userId, actor.userId),
+          gt(presence.lastSeenAt, new Date(Date.now() - PRESENCE_TTL_MS)),
+        ),
+      )
+      .limit(1);
+    if (other) return readState(db, actor, projectId, sessionId);
+  }
+  await db.delete(editLocks).where(mine);
   return readState(db, actor, projectId, sessionId);
 }
 
@@ -271,6 +301,7 @@ export async function requestControl(
   assertCan(actor.role, 'design:edit');
   const sessionId = checkSession(input.sessionId);
   await getProject(db, actor, projectId);
+  await touchPresence(db, actor, projectId, sessionId); // the requester is here
   const [lock] = await db
     .update(editLocks)
     .set({ requestedBy: actor.userId, requestedAt: new Date() })

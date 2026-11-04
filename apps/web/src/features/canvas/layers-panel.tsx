@@ -19,7 +19,6 @@ export function LayersPanel() {
   const open = useCanvas((s) => s.layersOpen);
   const hoverId = useCanvas((s) => s.hover?.nodeId);
   const docStore = useDocStoreApi();
-  const canvas = useCanvasStoreApi();
 
   const [expanded, setExpanded] = useState<Set<string>>(
     () => new Set(doc.frames.map((f) => f.rootNodeId)),
