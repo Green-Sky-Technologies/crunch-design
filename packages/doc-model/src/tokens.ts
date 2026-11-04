@@ -81,3 +81,8 @@ export function resolveToken(
 export function tokenCssVar(path: string): string {
   return `--${path.replace(/\./g, '-')}`;
 }
+
+/** Validate a literal against a token type (used for doc-level overrides and imports). */
+export function isValidTokenValue(type: TokenType, value: unknown): boolean {
+  return byType[type].safeParse(value).success;
+}
