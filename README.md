@@ -15,14 +15,14 @@ The product spec is in [`SPEC.md`](SPEC.md).
 
 ## Deploy to Vercel
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FGreen-Sky-Technologies%2Fcrunch-design&project-name=crunch-design&repository-name=crunch-design&env=CREDENTIALS_MASTER_KEYS%2CCRON_SECRET&envDescription=Two%20random%20secrets.%20Generate%20each%20with%3A%20openssl%20rand%20-base64%2032&envLink=https%3A%2F%2Fgithub.com%2FGreen-Sky-Technologies%2Fcrunch-design%23deploy-to-vercel&stores=%5B%7B%22type%22%3A%22integration%22%2C%22integrationSlug%22%3A%22neon%22%2C%22productSlug%22%3A%22neon%22%7D%2C%7B%22type%22%3A%22integration%22%2C%22integrationSlug%22%3A%22clerk%22%2C%22productSlug%22%3A%22clerk%22%7D%2C%7B%22type%22%3A%22blob%22%2C%22access%22%3A%22public%22%7D%5D)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FGreen-Sky-Technologies%2Fcrunch-design&project-name=crunch-design&repository-name=crunch-design&env=CREDENTIALS_MASTER_KEYS%2CCRON_SECRET&envDescription=Two%20random%20secrets.%20Generate%20each%20with%3A%20openssl%20rand%20-base64%2032&envLink=https%3A%2F%2Fgithub.com%2FGreen-Sky-Technologies%2Fcrunch-design%23deploy-to-vercel&integration-ids=oac_7uYNbc9CdDAZmNqbt3LEkO3a&stores=%5B%7B%22type%22%3A%22integration%22%2C%22integrationSlug%22%3A%22neon%22%2C%22productSlug%22%3A%22neon%22%7D%2C%7B%22type%22%3A%22blob%22%2C%22access%22%3A%22public%22%7D%5D)
 
 Everything runs on Vercel. The button walks you through it:
 
 1. **Clone** the repository into your GitHub account.
 2. **Set Root Directory to `apps/web`** on the Configure step (this is a monorepo).
-3. **Add the integrations it offers:** Neon (Postgres), Clerk (sign-in and workspaces) and a
-   public Blob store (chat images and Figma assets). Each has a free plan, and each sets its own
+3. **Add the integrations it asks for:** Clerk (sign-in and workspaces), then Neon (Postgres)
+   and a public Blob store (chat images and Figma assets). Each has a free plan and sets its own
    environment variables.
 4. **Fill in two secrets.** Generate each with `openssl rand -base64 32`:
    - `CREDENTIALS_MASTER_KEYS` encrypts stored secrets (model credentials, Figma tokens). Keep
