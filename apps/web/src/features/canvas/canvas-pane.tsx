@@ -4,10 +4,17 @@
  * The infinite canvas (Story 3.1, ADR 0001): a viewport with a CSS-transformed world layer of
  * live frames, and a screen-space overlay layer above it for frame chrome and selection UI.
  */
-import { cameraTransform, wheelCamera, type Camera } from '@crunch/canvas';
+import {
+  cameraTransform,
+  frameRect,
+  intersects,
+  viewportWorldRect,
+  wheelCamera,
+  type Camera,
+} from '@crunch/canvas';
 import type { DesignDoc, DesignSystemSpec, Frame } from '@crunch/doc-model';
 import { FrameView } from '@crunch/renderer/react';
-import { memo, useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useDocStore, useDocStoreApi, useEditor } from '../doc-store';
 import { fitAll } from './camera-actions';
 import { useCanvas, useCanvasStoreApi } from './canvas-store';
@@ -23,29 +30,143 @@ import { isTypingEvent, startGesture } from './gesture';
 import { Minimap } from './minimap';
 import { CanvasToolbar } from './toolbar';
 
+/**
+ * Performance marks (Story 3.10): `cd:first-frame` when the first frame's content is laid out,
+ * `cd:canvas-interactive` when canvas input handlers are attached. Cheap, and visible in DevTools.
+ */
+let firstFrameMarked = false;
+function markFirstFrame(wrap: HTMLElement) {
+  if (firstFrameMarked || typeof performance === 'undefined') return;
+  const root = wrap.querySelector('[data-cd-frame-host]')?.shadowRoot;
+  if (root?.querySelector('[data-cd-id]') && wrap.offsetHeight > 0) {
+    firstFrameMarked = true;
+    performance.mark('cd:first-frame');
+  }
+}
+
+/**
+ * Progressive mounting (Story 3.10): on load, the first frame renders immediately and the rest
+ * mount one per task, visible frames first, so the first frame is interactive quickly and no
+ * single task renders thousands of nodes. Frames added later (new, duplicated, inserted by the
+ * agent) render immediately.
+ */
+function useLiveFrames(frames: readonly Frame[]): ReadonlySet<string> {
+  const canvas = useCanvasStoreApi();
+  const [initial] = useState(() => new Set(frames.map((f) => f.id)));
+  const [mounted, setMounted] = useState<ReadonlySet<string>>(
+    () => new Set(frames.slice(0, 1).map((f) => f.id)),
+  );
+  const framesRef = useRef(frames);
+  useLayoutEffect(() => {
+    framesRef.current = frames;
+  });
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let done = mounted;
+    const step = () => {
+      const pending = framesRef.current.filter((f) => initial.has(f.id) && !done.has(f.id));
+      if (!pending.length) return;
+      const { camera, viewport, sizes } = canvas.getState();
+      const view = viewportWorldRect(camera, viewport);
+      const cx = view.x + view.width / 2;
+      const cy = view.y + view.height / 2;
+      // Visible frames first, then nearest to the viewport centre.
+      const score = (f: Frame) => {
+        const r = frameRect(f, sizes);
+        const dist = Math.hypot(r.x + r.width / 2 - cx, r.y + r.height / 2 - cy);
+        return intersects(r, view) ? dist - 1e9 : dist;
+      };
+      const next = pending.reduce((a, b) => (score(b) < score(a) ? b : a));
+      done = new Set(done).add(next.id);
+      setMounted(done);
+      timer = setTimeout(step, 16);
+    };
+    timer = setTimeout(step, 16);
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+    // Runs once: the mounted set is threaded through `done`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canvas, initial]);
+
+  return useMemo(() => {
+    const live = new Set(mounted);
+    for (const f of frames) if (!initial.has(f.id)) live.add(f.id);
+    return live;
+  }, [frames, mounted, initial]);
+}
+
+/** True if anything a frame renders differs between two docs (identity walk, thanks to immer). */
+export function frameChanged(prev: DesignDoc, next: DesignDoc, frameId: string): boolean {
+  if (prev === next) return false;
+  if (prev.tokenOverrides !== next.tokenOverrides) return true;
+  const f = next.frames.find((x) => x.id === frameId);
+  if (!f || prev.frames.find((x) => x.id === frameId) !== f) return true;
+  const stack = [f.rootNodeId];
+  while (stack.length) {
+    const id = stack.pop()!;
+    const n = next.nodes[id];
+    if (n !== prev.nodes[id]) return true; // a removed child shows up as a changed parent
+    if (n) for (const c of n.children) stack.push(c);
+  }
+  return false;
+}
+
+/**
+ * Per-frame doc snapshots (Story 3.10): a frame keeps receiving its previous doc object until an
+ * edit touches something it renders, so an edit in one frame doesn't make every other frame's
+ * renderer re-check all of its nodes.
+ */
+function useFrameDocs(doc: DesignDoc): ReadonlyMap<string, DesignDoc> {
+  const [cache, setCache] = useState(() => ({
+    doc,
+    map: new Map(doc.frames.map((f) => [f.id, doc])) as ReadonlyMap<string, DesignDoc>,
+  }));
+  if (cache.doc === doc) return cache.map;
+  const map = new Map<string, DesignDoc>();
+  for (const f of doc.frames) {
+    const prev = cache.map.get(f.id);
+    map.set(f.id, prev && !frameChanged(prev, doc, f.id) ? prev : doc);
+  }
+  // Adjusting state during render (React's documented pattern for derived state).
+  setCache({ doc, map });
+  return map;
+}
+
 const FrameItem = memo(function FrameItem({
   frame,
   doc,
   ds,
+  live,
 }: {
   frame: Frame;
   doc: DesignDoc;
   ds: DesignSystemSpec;
+  live: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const canvas = useCanvasStoreApi();
   const preview = useCanvas((s) => (s.framePreview?.frameId === frame.id ? s.framePreview : null));
+  const placeholderHeight = useCanvas((s) =>
+    live
+      ? undefined
+      : (s.sizes[frame.id]?.height ?? (frame.height === 'auto' ? 800 : frame.height)),
+  );
 
   // Measure the frame (auto-height frames grow with content) for chrome, fit and minimap.
   useLayoutEffect(() => {
+    if (!live) return;
     const el = ref.current!;
-    const measure = () =>
+    const measure = () => {
       canvas.getState().setSize(frame.id, { width: el.offsetWidth, height: el.offsetHeight });
+      markFirstFrame(el);
+    };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [canvas, frame.id]);
+  }, [canvas, frame.id, live]);
 
   // Width preview: the renderer pins `.cd-frame` to the frame width inside the shadow root.
   const previewWidth = preview?.width;
@@ -66,12 +187,13 @@ const FrameItem = memo(function FrameItem({
         top: frame.canvas.y + (preview?.dy ?? 0),
         width: previewWidth ?? frame.width,
         minHeight: frame.height === 'auto' ? undefined : frame.height,
+        height: placeholderHeight,
         background: '#fff',
         boxShadow: '0 1px 3px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.06)',
         contain: 'layout paint',
       }}
     >
-      <FrameView doc={doc} ds={ds} frameId={frame.id} />
+      {live && <FrameView doc={doc} ds={ds} frameId={frame.id} />}
     </div>
   );
 });
@@ -192,9 +314,27 @@ function useCameraGestures(ref: React.RefObject<HTMLDivElement | null>) {
   }, [ref, canvas]);
 }
 
+/**
+ * Overlay/chrome components take no props and subscribe to exactly the state they need. Memoizing
+ * them keeps a doc edit (which re-renders CanvasPane for the frames) from re-rendering them all.
+ */
+const UI = {
+  SelectionOverlay: memo(SelectionOverlay),
+  DropIndicator: memo(DropIndicator),
+  GuidesOverlay: memo(GuidesOverlay),
+  ResizeHandles: memo(ResizeHandles),
+  FrameChrome: memo(FrameChrome),
+  RegisteredOverlays: memo(RegisteredOverlays),
+  LayersPanel: memo(LayersPanel),
+  CanvasToolbar: memo(CanvasToolbar),
+  Minimap: memo(Minimap),
+};
+
 export function CanvasPane() {
   const { designSystem } = useEditor();
   const doc = useDocStore((s) => s.doc);
+  const live = useLiveFrames(doc.frames);
+  const frameDocs = useFrameDocs(doc);
   const select = useDocStore((s) => s.select);
   const viewportRef = useRef<HTMLDivElement>(null);
   useViewport(viewportRef);
@@ -227,23 +367,29 @@ export function CanvasPane() {
       >
         <World>
           {doc.frames.map((f) => (
-            <FrameItem key={f.id} frame={f} doc={doc} ds={designSystem.spec} />
+            <FrameItem
+              key={f.id}
+              frame={f}
+              doc={frameDocs.get(f.id) ?? doc}
+              ds={designSystem.spec}
+              live={live.has(f.id)}
+            />
           ))}
         </World>
         <div
           data-cd-overlay=""
           style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}
         >
-          <SelectionOverlay />
-          <DropIndicator />
-          <GuidesOverlay />
-          <ResizeHandles />
-          <FrameChrome />
-          <RegisteredOverlays />
+          <UI.SelectionOverlay />
+          <UI.DropIndicator />
+          <UI.GuidesOverlay />
+          <UI.ResizeHandles />
+          <UI.FrameChrome />
+          <UI.RegisteredOverlays />
         </div>
-        <LayersPanel />
-        <CanvasToolbar />
-        <Minimap />
+        <UI.LayersPanel />
+        <UI.CanvasToolbar />
+        <UI.Minimap />
       </div>
     </ViewportCtx.Provider>
   );

@@ -124,3 +124,19 @@ interaction: public share pages (6.3) and visual-parity screenshots (7.1).
 - At the benchmark size there's no need for culling; if projects grow well beyond 20 frames,
   add `content-visibility` / viewport culling of off-screen frames.
 - Re-measure on real hardware (not headless) before closing 3.10; headless fps saturates.
+
+## Follow-up: performance budget (Story 3.10)
+
+`apps/web/e2e/canvas/perf.spec.ts` checks the budget on a 10-frame, ~3,000-node project, in its
+own serial Playwright projects. Two fixes were needed:
+
+- **Progressive frame mounting.** On load the first frame renders at once; the rest mount one
+  per task, visible frames first. First interactive frame went from 125ms to ~59ms (Chromium) and
+  from 182ms to ~62ms (Firefox).
+- **Per-frame doc snapshots.** An edit only hands a new doc to frames whose nodes it touched, so
+  untouched frames' renderers don't re-check every node. Inspector edit main-thread time in
+  Firefox went from 30–50ms to ~9ms (Chromium ~4ms).
+
+No long tasks over 50ms were observed during a drag (Chromium Long Tasks API). Headless WebKit
+(30Hz, 2x device scale) reports ~80ms, quantized to its rendering opportunities, and is held to a
+looser regression guard.

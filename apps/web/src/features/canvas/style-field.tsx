@@ -26,6 +26,37 @@ export interface ApplyMeta {
 
 let gestureSeq = 0;
 
+type FieldProps = {
+  prop: StylePropName;
+  state: PropState;
+  mixed: boolean;
+  bp: Breakpoint;
+  tokens: TokenOption[];
+  readOnly: boolean;
+  onApply(prop: StylePropName, value: unknown, meta?: ApplyMeta): boolean;
+};
+
+/**
+ * Inspector rows re-render only when their own prop's state changes (Story 3.10): the inspector
+ * recomputes PropState objects on every doc edit, so compare their contents, not identity.
+ */
+function sameField(a: FieldProps, b: FieldProps): boolean {
+  return (
+    a.prop === b.prop &&
+    a.bp === b.bp &&
+    a.mixed === b.mixed &&
+    a.readOnly === b.readOnly &&
+    a.tokens === b.tokens &&
+    a.onApply === b.onApply &&
+    a.state.from === b.state.from &&
+    a.state.setHere === b.state.setHere &&
+    a.state.inherited === b.state.inherited &&
+    a.state.setAt.join() === b.state.setAt.join() &&
+    (a.state.value === b.state.value ||
+      JSON.stringify(a.state.value) === JSON.stringify(b.state.value))
+  );
+}
+
 export const StyleField = memo(function StyleField({
   prop,
   state,
@@ -242,4 +273,4 @@ export const StyleField = memo(function StyleField({
       </div>
     </div>
   );
-});
+}, sameField);

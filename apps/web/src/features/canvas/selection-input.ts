@@ -149,6 +149,11 @@ export function useSelectionInput(viewportRef: RefObject<HTMLDivElement | null>)
       if (startTextEdit({ docStore: store, canvas, viewport: el }, t)) e.preventDefault();
     };
     el.addEventListener('pointerdown', onDown);
+    if (
+      typeof performance !== 'undefined' &&
+      !performance.getEntriesByName('cd:canvas-interactive').length
+    )
+      performance.mark('cd:canvas-interactive');
     el.addEventListener('pointermove', onMove);
     el.addEventListener('pointerleave', onLeave);
     el.addEventListener('click', onClick, true);
