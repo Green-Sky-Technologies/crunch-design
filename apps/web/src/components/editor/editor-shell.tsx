@@ -11,6 +11,7 @@ import { CanvasPane, EditLockIndicator, InspectorPane } from '@/features/canvas'
 import { CollabControls } from '@/features/collab';
 import { useDocStore, useDocStoreApi, useEditor } from '@/features/doc-store';
 import { ExportMenu } from '@/features/export';
+import { LintBadge } from './lint-badge';
 
 function SaveStatus() {
   const status = useDocStore((s) => s.status);
@@ -102,6 +103,7 @@ export function EditorShell() {
           >
             ↷
           </button>
+          <LintBadge />
           <CollabControls />
           <ExportMenu />
         </div>
