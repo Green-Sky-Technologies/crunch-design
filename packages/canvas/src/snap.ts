@@ -160,5 +160,6 @@ export function spacingGuides(r: Rect, others: readonly Rect[]): Distance[] {
       line: { x: midX(below[0]), y: r.y + r.height, width: 0, height: below[1] },
       value: below[1],
     });
-  return out.filter((d) => d.value > 0).map((d) => ({ ...d, value: Math.round(d.value) }));
+  // Round first: a sub-pixel gap would otherwise show as a "0" guide.
+  return out.map((d) => ({ ...d, value: Math.round(d.value) })).filter((d) => d.value > 0);
 }

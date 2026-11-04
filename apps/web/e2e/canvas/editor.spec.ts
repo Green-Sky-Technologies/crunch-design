@@ -80,8 +80,19 @@ test.describe('canvas editor', () => {
     ]);
     expect(await canvas.undoLabels()).toEqual(['Move layer', 'Move layer']);
 
-    await canvas.page.keyboard.press('ControlOrMeta+z');
-    await canvas.page.keyboard.press('ControlOrMeta+z');
+    // Undo both moves: the tree and the rendered order are back to the original.
+    // (The keyboard shortcut lives in the editor shell; the harness exposes the same store undo.)
+    await canvas.page.getByRole('button', { name: 'Undo' }).click();
+    await canvas.page.getByRole('button', { name: 'Undo' }).click();
+    doc = await canvas.doc();
+    expect(doc.nodes['n_hero000001']!.children).toEqual([
+      'n_herotitle1',
+      'n_herobody01',
+      'n_herocta001',
+    ]);
+    expect(doc.nodes['n_feat2card00']!.children).toEqual(['n_feat2title0', 'n_feat2body00']);
+    expect(doc.nodes['n_feat1card00']!.children).toEqual(['n_feat1title0', 'n_feat1body00']);
+    expect((await canvas.box('n_herotitle1')).y).toBeLessThan((await canvas.box('n_herobody01')).y);
   });
 
   test('resizes with handles to a fixed size and hugs on double-click', async ({

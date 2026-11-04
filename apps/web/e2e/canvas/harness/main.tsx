@@ -42,6 +42,7 @@ const initial: DesignDoc =
 const bob = { userId: 'user_bob', name: 'Bob Builder', imageUrl: null };
 const meUser = { userId: params.get('user') ?? 'user_e2e', name: 'E2E User', imageUrl: null };
 let lockHolder: typeof bob | null = params.get('lock') === 'other' ? bob : null;
+let requestedBy: typeof bob | null = null;
 const lockState = (): LockState => ({
   lock: lockHolder
     ? {
@@ -50,7 +51,7 @@ const lockState = (): LockState => ({
         isThisSession: lockHolder.userId === meUser.userId,
         acquiredAt: new Date().toISOString(),
         heartbeatAt: new Date().toISOString(),
-        requestedBy: null,
+        requestedBy,
       }
     : null,
   presence: [{ ...meUser, isMe: true }, ...(lockHolder === bob ? [{ ...bob, isMe: false }] : [])],
@@ -64,17 +65,36 @@ setLockApi({
     return { acquired, state: lockState() };
   },
   heartbeat: async () => lockState(),
-  release: async () => {
-    if (lockHolder === meUser) lockHolder = null;
+  release: async (_p, _s, opts) => {
+    if (lockHolder === meUser) lockHolder = opts?.handoff && requestedBy ? requestedBy : null;
+    requestedBy = null;
     return lockState();
   },
-  request: async () => lockState(),
-  decline: async () => lockState(),
+  request: async () => {
+    if (lockHolder && lockHolder !== meUser) requestedBy = meUser;
+    return lockState();
+  },
+  decline: async () => {
+    requestedBy = null;
+    return lockState();
+  },
   takeOver: async () => {
     lockHolder = meUser;
+    requestedBy = null;
     return lockState();
   },
 });
+
+/** Test control of the fake lock server (the "other user" side of lock transitions). */
+const lockServer = {
+  holder: () => lockHolder?.userId ?? null,
+  requestedBy: () => requestedBy?.userId ?? null,
+  /** Bob closes his tab (or his lock expires): the lock is free on the next poll. */
+  otherLeaves: () => {
+    if (lockHolder === bob) lockHolder = null;
+    requestedBy = null;
+  },
+};
 
 let serverDoc = initial;
 let version = 0;
@@ -98,6 +118,7 @@ declare global {
       commits: typeof commits;
       serverDoc: () => DesignDoc;
       t0: number;
+      lock: typeof lockServer;
     };
   }
 }
@@ -113,6 +134,7 @@ function Expose() {
       commits,
       serverDoc: () => serverDoc,
       t0,
+      lock: lockServer,
     };
   }, [store]);
   return null;

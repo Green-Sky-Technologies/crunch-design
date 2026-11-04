@@ -57,6 +57,12 @@ describe('spacing guides', () => {
     const v = d.find((x) => x.value === 30)!;
     expect(v.line).toMatchObject({ y: 120, height: 30, width: 0 });
   });
+
+  it('never reports a sub-pixel gap as a 0 guide', () => {
+    const r = { x: 100, y: 100, width: 50, height: 20 };
+    const touching = { x: 49.7, y: 100, width: 50, height: 20 }; // gap 0.3
+    expect(spacingGuides(r, [touching])).toEqual([]);
+  });
 });
 
 describe('smart guides', () => {
