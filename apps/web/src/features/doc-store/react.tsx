@@ -15,7 +15,13 @@ import {
 } from './store';
 
 export interface EditorInfo {
-  project: { id: string; name: string; description: string | null };
+  project: {
+    id: string;
+    name: string;
+    description: string | null;
+    /** Archived: read-only until restored (`permissions` already excludes edits). */
+    archived?: boolean;
+  };
   workspace: { id: string; slug: string; name: string };
   user: { id: string; role: Role };
   /** Permissions the current user has (from @crunch/authz). */

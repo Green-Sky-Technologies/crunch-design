@@ -1,4 +1,4 @@
-import { permissionsFor } from '@crunch/authz';
+import { permissionsForProject } from '@crunch/authz';
 import { notFound } from 'next/navigation';
 import { EditorShell } from '@/components/editor/editor-shell';
 import { EditorProvider } from '@/features/doc-store';
@@ -25,14 +25,20 @@ export default async function ProjectPage({ params }: PageProps<'/w/[slug]/p/[pr
   return (
     <EditorProvider
       info={{
-        project: { id: project.id, name: project.name, description: project.description },
+        project: {
+          id: project.id,
+          name: project.name,
+          description: project.description,
+          archived: !!project.archivedAt,
+        },
         workspace: {
           id: actor.workspace.id,
           slug: actor.workspace.slug,
           name: actor.workspace.name,
         },
         user: { id: actor.userId, role: actor.role },
-        permissions: permissionsFor(actor.role),
+        // Archived projects open read-only (the server refuses edits and comments too).
+        permissions: permissionsForProject(actor.role, { archived: !!project.archivedAt }),
         designSystem: ds,
         agentAvailable,
       }}

@@ -228,7 +228,7 @@ export function CommentsPanel({
   composerExtras?: ComposerExtras;
   threadExtras?: ThreadExtras;
 }) {
-  const { can } = useEditor();
+  const { can, project } = useEditor();
   const threads = useCollab((s) => s.threads);
   const loaded = useCollab((s) => s.loaded);
   const loadError = useCollab((s) => s.loadError);
@@ -242,7 +242,9 @@ export function CommentsPanel({
         <Composer extras={composerExtras} />
       ) : (
         <p className="border-b border-border p-3 text-xs text-muted">
-          You have view-only access, so you can read comments but not add them.
+          {project.archived
+            ? 'This project is archived. Restore it to add comments.'
+            : 'You have view-only access, so you can read comments but not add them.'}
         </p>
       )}
       <label className="flex items-center gap-2 px-3 py-2 text-xs text-muted">

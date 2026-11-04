@@ -50,7 +50,9 @@ export function AgentPane() {
         {chat.busy && <span className="text-xs text-muted">Working…</span>}
       </div>
       <div className="min-h-0 flex-1 space-y-3 overflow-auto p-4" aria-live="polite">
-        {!canRun ? (
+        {project.archived ? (
+          <p className="text-muted">This project is archived. Restore it to make changes.</p>
+        ) : !canRun ? (
           <p className="text-muted">You have view access. Ask an editor to make changes.</p>
         ) : !agentAvailable ? (
           <p className="text-muted">
