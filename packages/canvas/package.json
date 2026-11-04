@@ -13,8 +13,7 @@
   "dependencies": {
     "@crunch/contracts": "workspace:*",
     "@crunch/doc-model": "workspace:*",
-    "@crunch/renderer": "workspace:*",
-    "tldraw": "^5.6.0"
+    "@crunch/renderer": "workspace:*"
   },
   "devDependencies": {
     "@types/react": "^19.3.0",

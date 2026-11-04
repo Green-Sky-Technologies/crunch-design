@@ -3,7 +3,9 @@ import { permissionsFor } from '@crunch/authz';
 import { applyOps, initialDoc, starterDesignSystem, type DesignDoc } from '@crunch/doc-model';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { setLockApi } from '@/features/canvas/lock';
+import { grantingLockApi } from '@/features/canvas/test-utils';
 import { EditorProvider, type DocApi } from '@/features/doc-store';
 import { EditorShell } from './editor-shell';
 
@@ -15,7 +17,18 @@ vi.mock('next/link', () => ({
   ),
 }));
 
-afterEach(cleanup);
+// The shell now hosts the canvas lock controller and the collab panel; keep them off the network.
+beforeEach(() => {
+  setLockApi(grantingLockApi);
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response(JSON.stringify({ error: 'not_found' }), { status: 404 })),
+  );
+});
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 function setup(role: 'editor' | 'viewer') {
   let doc: DesignDoc = initialDoc();
