@@ -2,12 +2,13 @@
 
 /** Agent pane (Epic 5): the project's conversation with the agent. Reads useEditor()/useDocStore(). */
 import Link from 'next/link';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useEditor } from '../doc-store';
 import { agentApi, type JobSuggestion } from './api';
 import { Composer } from './composer';
 import { JobCard, JobSuggestionCard } from './job-card';
 import { MessageItem } from './message-item';
+import { ModelPicker, useAgentSettings } from './model-picker';
 import { SliderTray } from './slider-tray';
 import { useAgentChat } from './use-agent-chat';
 
@@ -17,6 +18,8 @@ export function AgentPane() {
   const chat = useAgentChat(project.id, agentAvailable, canRun && agentAvailable);
   const endRef = useRef<HTMLDivElement>(null);
   const live = canRun && agentAvailable;
+  const settings = useAgentSettings(live);
+  const [model, setModel] = useState('');
 
   const startJob = async (s: JobSuggestion) => {
     try {
@@ -27,6 +30,7 @@ export function AgentPane() {
         prompt: s.prompt,
         frameIds: s.frameIds,
         count: s.count,
+        model: model || undefined,
       });
       chat.track(message);
     } catch (e) {
@@ -96,7 +100,10 @@ export function AgentPane() {
         <Composer
           projectId={project.id}
           disabled={chat.busy}
-          onSend={(prompt, attachments) => chat.send(prompt, { attachments })}
+          onSend={(prompt, attachments) =>
+            chat.send(prompt, { attachments, model: model || undefined })
+          }
+          modelPicker={<ModelPicker settings={settings} value={model} onChange={setModel} />}
         />
       )}
     </div>

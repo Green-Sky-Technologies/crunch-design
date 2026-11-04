@@ -75,6 +75,35 @@ beforeEach(() => {
         needsRun: true,
         streamUrl: '/api/agent/messages/a2/stream',
       });
+    if (url === '/api/agent/settings')
+      return body({
+        models: [
+          {
+            id: 'claude-sonnet-5-5',
+            label: 'Claude Sonnet 5.5',
+            tier: 'interactive',
+            relativeCost: 1,
+            relativeCostLabel: '1×',
+            allowed: true,
+          },
+          {
+            id: 'claude-opus-5-5',
+            label: 'Claude Opus 5.5',
+            tier: 'generation',
+            relativeCost: 2,
+            relativeCostLabel: '2×',
+            allowed: true,
+          },
+        ],
+        defaults: {
+          interactive: 'claude-sonnet-5-5',
+          generation: 'claude-opus-5-5',
+          utility: null,
+        },
+        overrides: {},
+        allowedModels: null,
+        canManage: false,
+      });
     if (url === '/api/agent/jobs')
       return body({
         job: { id: 'j1', status: 'queued' },
@@ -120,13 +149,16 @@ describe('AgentPane', () => {
   it('sends a prompt, then streams the reply with tool activity', async () => {
     renderPane();
     const box = await screen.findByLabelText('Message the agent');
+    const picker = (await screen.findByLabelText('Model')) as HTMLSelectElement;
+    expect(picker.textContent).toContain('Opus 5.5 · 2× cost');
+    fireEvent.change(picker, { target: { value: 'claude-opus-5-5' } });
     fireEvent.change(box, { target: { value: 'make the headline bigger' } });
     fireEvent.click(screen.getByText('Send'));
     await waitFor(() => expect(FakeEventSource.all).toHaveLength(1));
     const sent = JSON.parse(
       fetchMock.mock.calls.find((c) => c[0] === '/api/agent/messages')![1].body,
     );
-    expect(sent).toMatchObject({ prompt: 'make the headline bigger' });
+    expect(sent).toMatchObject({ prompt: 'make the headline bigger', model: 'claude-opus-5-5' });
     expect(screen.getByText('make the headline bigger')).toBeTruthy();
 
     const es = FakeEventSource.all[0]!;
