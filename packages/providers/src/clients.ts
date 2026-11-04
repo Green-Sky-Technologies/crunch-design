@@ -22,9 +22,29 @@ export const MODEL_TIERS = {
 } as const;
 export type ModelTier = keyof typeof MODEL_TIERS;
 
-/** Map a first-party model id to the id a provider route expects. */
+/** Vercel AI Gateway's Anthropic-compatible endpoint (the SDK appends /v1/messages). */
+export const AI_GATEWAY_BASE_URL = 'https://ai-gateway.vercel.sh';
+
+/**
+ * Map a first-party model id to the id a provider route expects.
+ *  - Bedrock: `anthropic.claude-opus-5-5`
+ *  - AI Gateway: `anthropic/claude-opus-5.5` (version written with a dot)
+ */
 export function providerModelId(provider: StoredConfig['provider'], model: string): string {
-  return provider === 'bedrock' ? `anthropic.${model}` : model;
+  if (provider === 'bedrock') return `anthropic.${model}`;
+  if (provider === 'gateway')
+    return `anthropic/${model.replace(/^(claude-[a-z]+-\d+)-(\d+)$/, '$1.$2')}`;
+  return model;
+}
+
+/**
+ * Anthropic SDK client pointed at Vercel AI Gateway. `apiKey` is an AI Gateway API key or an
+ * async getter (for Vercel OIDC tokens, which expire; the SDK calls it before every request).
+ * Either way it's sent as `Authorization: Bearer`. Passing it explicitly stops the SDK from
+ * reading ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN from the environment.
+ */
+export function buildGatewayClient(apiKey: string | (() => Promise<string>)): Anthropic {
+  return new Anthropic({ baseURL: AI_GATEWAY_BASE_URL, apiKey, maxRetries: 1 });
 }
 
 export interface BuildOptions {
@@ -45,6 +65,10 @@ export async function buildClient(
     case 'anthropic': {
       if (secret?.provider !== 'anthropic') throw new Error('Missing Anthropic API key');
       return new Anthropic({ apiKey: secret.apiKey, maxRetries: 1 });
+    }
+    case 'gateway': {
+      if (secret?.provider !== 'gateway') throw new Error('Missing AI Gateway API key');
+      return buildGatewayClient(secret.apiKey);
     }
     case 'bedrock': {
       if (config.authMode === 'access_keys') {

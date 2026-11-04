@@ -1,5 +1,7 @@
 /**
- * GET /api/jobs/reap: Vercel Cron entry point (apps/web/vercel.json, every minute).
+ * GET /api/jobs/reap: Vercel Cron entry point (apps/web/vercel.json). The schedule is daily so
+ * the app deploys on the Hobby plan; job status reads also run the reaper (opportunistic-reap.ts).
+ * On Pro, change the schedule to every minute (`* * * * *`).
  * Vercel sends `Authorization: Bearer $CRON_SECRET`; set CRON_SECRET in the project env.
  * Fails timed-out jobs, reaps orphaned sandboxes, retries lost ones that made no changes, and
  * starts queued jobs whose start was lost.

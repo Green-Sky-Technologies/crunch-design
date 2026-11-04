@@ -1,93 +1,169 @@
 # CrunchDesign
 
-AI design canvas: a conversational agent plus a WYSIWYG canvas of live HTML frames.
-The product spec is in [`SPEC.md`](SPEC.md) (epics, stories, decision log).
+An AI design canvas. Describe a screen, and an agent builds it as live HTML frames on an
+infinite canvas. Refine it in chat, comment on elements, or edit it directly with a
+Figma-style edit panel. Then share it, or export HTML, a handoff bundle or React + Tailwind.
 
-## Layout
+- **Agent:** Claude, through Vercel AI Gateway (no API keys to manage) or your own Anthropic,
+  Bedrock, Vertex or Foundry credentials. Quick edits stream from the Messages API. Long
+  generations run as background jobs (Claude Agent SDK in a Vercel Sandbox).
+- **Canvas:** live HTML frames with View, Edit and Comment modes, breakpoints, design-system
+  tokens, sliders, versions and a soft edit lock for teams.
+- **Teams:** workspaces with Admin, Editor and Viewer roles (Clerk Organizations).
 
+The product spec is in [`SPEC.md`](SPEC.md).
+
+## Deploy to Vercel
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FGreen-Sky-Technologies%2Fcrunch-design&project-name=crunch-design&repository-name=crunch-design&env=CREDENTIALS_MASTER_KEYS%2CCRON_SECRET&envDescription=Two%20random%20secrets.%20Generate%20each%20with%3A%20openssl%20rand%20-base64%2032&envLink=https%3A%2F%2Fgithub.com%2FGreen-Sky-Technologies%2Fcrunch-design%23deploy-to-vercel&stores=%5B%7B%22type%22%3A%22integration%22%2C%22integrationSlug%22%3A%22neon%22%2C%22productSlug%22%3A%22neon%22%7D%2C%7B%22type%22%3A%22integration%22%2C%22integrationSlug%22%3A%22clerk%22%2C%22productSlug%22%3A%22clerk%22%7D%2C%7B%22type%22%3A%22blob%22%2C%22access%22%3A%22public%22%7D%5D)
+
+Everything runs on Vercel. The button walks you through it:
+
+1. **Clone** the repository into your GitHub account.
+2. **Set Root Directory to `apps/web`** on the Configure step (this is a monorepo).
+3. **Add the integrations it offers:** Neon (Postgres), Clerk (sign-in and workspaces) and a
+   public Blob store (chat images and Figma assets). Each has a free plan, and each sets its own
+   environment variables.
+4. **Fill in two secrets.** Generate each with `openssl rand -base64 32`:
+   - `CREDENTIALS_MASTER_KEYS` encrypts stored secrets (model credentials, Figma tokens). Keep
+     it safe: losing it means re-entering those secrets.
+   - `CRON_SECRET` authenticates Vercel Cron.
+5. **Deploy.** The build ([`scripts/vercel-build.mjs`](scripts/vercel-build.mjs)) applies
+   database migrations and configures Clerk (organizations, slugs and the Editor and Viewer
+   roles), so there's nothing else to set up.
+
+Then open the deployment, sign up, and create a workspace.
+
+**Models.** On Vercel, the agent uses [Vercel AI Gateway](https://vercel.com/ai-gateway)
+automatically. It authenticates with the deployment's own OIDC token, so there's no API key, and
+usage is billed to the Vercel team that hosts the deployment. A workspace admin can instead add
+their own credential under **Settings → Model access** (Anthropic, Amazon Bedrock, Google
+Vertex AI, Microsoft Foundry, or an AI Gateway key) to bill that workspace's usage to them.
+
+**Cron.** [`apps/web/vercel.json`](apps/web/vercel.json) runs the job reaper daily, which is
+what the Hobby plan allows. While anyone is watching a job, the app also runs the reaper about
+once a minute. On a Pro plan, you can change the schedule to `* * * * *`.
+
+**Previews.** Migrations run on production deploys only. If previews have their own database
+(Neon's integration can create a branch per preview), set `MIGRATE_ON_PREVIEW=1`.
+
+**Production sign-in.** The Clerk integration starts with a development instance. To go live,
+add a production instance and domain in Clerk and update the keys in Vercel.
+
+### Updating your deployment
+
+The Deploy Button **clones** this repository into your account. It's a copy, not a fork, so
+updates don't arrive on their own. To pull in a new release:
+
+```bash
+git remote add upstream https://github.com/Green-Sky-Technologies/crunch-design.git  # once
+git pull upstream main
+git push                    # Vercel redeploys; migrations run in the build
 ```
-apps/web            Next.js 16 app (Vercel): UI, server actions, route handlers
-packages/db         Drizzle schema, migrations, Postgres client
-packages/crypto     Envelope encryption for secrets at rest
-packages/authz      Roles → permissions (single source of truth)
-packages/providers  Claude routes (Anthropic, Bedrock, Vertex, Foundry): credential shapes, clients, tests
-packages/doc-model  DesignDoc schema, style allowlist, tokens, design-system spec, ops/reducer (Epic 2)
-packages/renderer   Token CSS, live frame renderer (React, Shadow DOM) and static HTML renderer (Epic 2)
-packages/contracts  Cross-stream interfaces: agent tools, agent edit, ds-lint, job runner, overlays, handoff
-packages/ds-lint    Design-system linter (stub until Epic 4)
-packages/canvas, agent, sandbox-runner, handoff, figma-convert   Phase 1 skeletons (see docs/worktree-plan.md)
-apps/figma-plugin   Figma plugin skeleton (Epic 8)
-infra/              OpenTofu: Vercel project, Neon Postgres, env vars
-```
 
-Workspace packages are consumed as TypeScript source (`exports` → `src/index.ts`) and
-compiled by Next via `transpilePackages`. There's no separate build step.
+If you'd rather keep a GitHub fork (with its "Sync fork" button), fork the repository first, then
+import the fork in Vercel (**Add New → Project**). Set Root Directory to `apps/web`, add the
+Neon, Clerk and Blob integrations from the project's **Storage** tab, and set the two secrets.
 
-## Local setup
+### Configuration
+
+| Variable                                                | Required    | Notes                                                                                                                                              |
+| ------------------------------------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`                                          | yes         | Set by the Neon integration.                                                                                                                       |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY` | yes         | Set by the Clerk integration.                                                                                                                      |
+| `CREDENTIALS_MASTER_KEYS`                               | yes         | `openssl rand -base64 32`. To rotate, use `newid:<key>,<old key>` and set `CREDENTIALS_ACTIVE_KEY_ID=newid`.                                       |
+| `CRON_SECRET`                                           | recommended | `openssl rand -base64 32`. Without it, the cron endpoint refuses every call.                                                                       |
+| `BLOB_READ_WRITE_TOKEN`                                 | recommended | Set by the Blob store. Without it, chat image uploads and Figma image import are off.                                                              |
+| `CRUNCH_AI_GATEWAY`                                     | no          | `on` or `off`. The default is on when running on Vercel or when `AI_GATEWAY_API_KEY` is set. With `off`, every workspace needs its own credential. |
+| `AI_GATEWAY_API_KEY`                                    | no          | Use a gateway API key instead of the deployment's OIDC token (for example, when hosting outside Vercel).                                           |
+| `CLERK_WEBHOOK_SIGNING_SECRET`                          | no          | Webhook at `/api/webhooks/clerk` for `user.*`, `organization.*` and `organizationMembership.*`. Without it, members sync on each request.          |
+| `MIGRATE_ON_PREVIEW`                                    | no          | `1` to run migrations on preview deploys.                                                                                                          |
+| `CRUNCH_AWS_PRINCIPAL_ARN`                              | no          | Only for Bedrock credentials that use role assumption.                                                                                             |
+
+## Local development
 
 Requires Node 22, pnpm 10 and Docker.
 
 ```bash
 pnpm install
-pnpm db:up                     # Postgres 17 on localhost:5433
-pnpm db:migrate
+pnpm db:up && pnpm db:migrate      # Postgres 17 on localhost:5433
 cp apps/web/.env.example apps/web/.env.local
-pnpm keygen                    # paste the output into CREDENTIALS_MASTER_KEYS
-pnpm dev                       # http://localhost:3000
 ```
 
-### Clerk
+Then fill in `apps/web/.env.local`:
 
-1. **Quick start, no account:** run `npx clerk@latest init --framework next --accountless` in
-   `apps/web`. It writes temporary dev keys into `.env.local` (keeping your other variables).
-   Run `clerk auth login` later to claim the app into your Clerk account.
-   Or create an app at dashboard.clerk.com and put `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and
-   `CLERK_SECRET_KEY` in `.env.local` yourself.
-2. **Organizations and roles:** after `npx clerk@latest auth login`, run `scripts/clerk-setup.sh`
-   (or `scripts/clerk-setup.sh prod`). It turns on Organizations (workspaces) with slugs and forced
-   selection, creates the `org:editor` and `org:viewer` roles next to `org:admin`, and makes
-   `org:viewer` the default for new members. It's safe to re-run. `org:member` is treated as
-   editor; the mapping lives in `packages/authz`.
-3. (Dev instances cap organizations at 5 members by default; raise `max_allowed_memberships`
-   with `clerk enable orgs --max-members <n>` if you need more.)
-4. **Webhook** (optional locally, required in production): endpoint `/api/webhooks/clerk`; events
-   `user.*`, `organization.*`, `organizationMembership.*`; put the signing secret in
-   `CLERK_WEBHOOK_SIGNING_SECRET`. Without it, workspaces and members are still mirrored lazily on
-   each request.
+- **Clerk:** create a free app at [dashboard.clerk.com](https://dashboard.clerk.com) and paste its
+  keys. Then run `pnpm setup:clerk` once to turn on organizations and create the roles.
+- **`CREDENTIALS_MASTER_KEYS`:** `openssl rand -base64 32`.
+- **Models (pick one):**
+  - `vercel link && vercel env pull` gives you an OIDC token for AI Gateway.
+  - Or set `AI_GATEWAY_API_KEY`.
+  - Or set `CRUNCH_AI_GATEWAY=off` and add a credential under Settings → Model access.
 
-## Commands
+```bash
+pnpm dev                           # http://localhost:3000
+```
 
-| Command                                      | What it does                                                   |
-| -------------------------------------------- | -------------------------------------------------------------- |
-| `pnpm dev`                                   | Run everything in dev mode                                     |
-| `pnpm lint` / `pnpm typecheck` / `pnpm test` | Checks across all packages (via Turborepo)                     |
-| `pnpm build`                                 | Production build                                               |
-| `pnpm --filter @crunch/web e2e`              | Playwright on Chromium, Firefox and WebKit (needs Clerk keys)  |
-| `pnpm --filter @crunch/web e2e:app`          | Signed-in app suite: real Clerk users, roles and workspaces    |
-| `pnpm db:generate`                           | Generate a migration after editing `packages/db/src/schema.ts` |
-| `pnpm db:migrate`                            | Apply migrations to `DATABASE_URL`                             |
-| `pnpm keygen [id]`                           | New credential master key                                      |
+### Commands
 
-Integration tests use `TEST_DATABASE_URL` (default `postgres://crunch:crunch@localhost:5433/crunch_test`).
-The test database is created and migrated automatically.
+| Command                                      | What it does                                                                 |
+| -------------------------------------------- | ---------------------------------------------------------------------------- |
+| `pnpm dev`                                   | Run the app in dev mode                                                      |
+| `pnpm lint` / `pnpm typecheck` / `pnpm test` | Checks across all packages (Turborepo). Integration tests need `pnpm db:up`. |
+| `pnpm build`                                 | Production build                                                             |
+| `pnpm db:generate`                           | Generate a migration after editing `packages/db/src/schema`                  |
+| `pnpm db:migrate`                            | Apply migrations to `DATABASE_URL`                                           |
+| `pnpm setup:clerk`                           | Configure the Clerk instance in `CLERK_SECRET_KEY` (idempotent)              |
+| `pnpm keygen [id]`                           | Print a named credential master key (`id:base64`) for rotation               |
+| `pnpm --filter @crunch/web e2e:canvas`       | Canvas end-to-end tests (Playwright, no sign-in)                             |
+| `pnpm --filter @crunch/web e2e:app`          | Signed-in end-to-end suite with real Clerk users, roles and workspaces       |
 
-### End-to-end tests against the real app
+Integration tests use `TEST_DATABASE_URL` (default
+`postgres://crunch:crunch@localhost:5433/crunch_test`), which is created and migrated
+automatically.
 
-`pnpm --filter @crunch/web e2e:app` builds the app, starts it on port 3200 (`E2E_PORT`) and drives
-it with real Clerk sign-ins (`e2e/app`). It needs Clerk **development** keys (`pk_test_`/`sk_test_`)
-and `CREDENTIALS_MASTER_KEYS` in `apps/web/.env.local` (or the environment), and a migrated
-`DATABASE_URL` (use a database of its own, e.g. `crunch_e2e`). Each run creates its own users
-(`e2e+<role>-<runId>+clerk_test@example.com`), workspace and outsider org through the Clerk Backend
-API, and the teardown project deletes exactly those. If a run dies before teardown, the next run
-cleans it up, or run `pnpm exec tsx apps/web/e2e/app/cleanup.ts`. Set `E2E_SKIP_BUILD=1` to reuse
-an existing build.
+`e2e:app` builds the app, starts it on port 3200 and signs in real Clerk users. It needs Clerk
+**development** keys, `CREDENTIALS_MASTER_KEYS` and a migrated database of its own (for example,
+`crunch_e2e`). Each run creates and then deletes its own users and organizations. If a run dies
+first, the next run cleans up, or run `pnpm exec tsx apps/web/e2e/app/cleanup.ts`.
+
+## Repository layout
+
+```
+apps/web               Next.js 16 app: UI, server actions, route handlers
+apps/figma-plugin      Figma plugin (push designs, sync tokens)
+packages/agent         Agent tools, prompts, interactive turns, follow-up questions
+packages/canvas        Canvas geometry, layout, insert and drag logic
+packages/doc-model     DesignDoc schema, styles, tokens, design systems, ops
+packages/renderer      Live (Shadow DOM) and static HTML renderers
+packages/db            Drizzle schema, migrations, Postgres client
+packages/providers     Model routes: AI Gateway, Anthropic, Bedrock, Vertex, Foundry
+packages/crypto        Envelope encryption for secrets at rest
+packages/authz         Roles and permissions
+packages/handoff, figma-convert, ds-lint, sandbox-runner, contracts
+scripts/               vercel-build, setup-clerk, keygen
+```
+
+Workspace packages are consumed as TypeScript source and compiled by Next.js; there's no
+separate build step. [`CLAUDE.md`](CLAUDE.md) has the code conventions (authorization,
+services, secrets).
 
 ## Roles
 
-|                                                    | Admin | Editor | Viewer |
-| -------------------------------------------------- | :---: | :----: | :----: |
-| View projects & designs                            |   ✓   |   ✓    |   ✓    |
-| Deterministic export (HTML/ZIP, handoff bundle)    |   ✓   |   ✓    |   ✓    |
-| Create / edit / archive projects, comment, sliders |   ✓   |   ✓    |        |
-| Run the agent, LLM exports (codegen, Figma push)   |   ✓   |   ✓    |        |
-| Manage members and model credentials               |   ✓   |        |        |
+|                                                     | Admin | Editor | Viewer |
+| --------------------------------------------------- | :---: | :----: | :----: |
+| View projects and designs                           |   ✓   |   ✓    |   ✓    |
+| Deterministic export (HTML/ZIP, handoff bundle)     |   ✓   |   ✓    |   ✓    |
+| Create, edit and archive projects; comment; sliders |   ✓   |   ✓    |        |
+| Run the agent, LLM exports (codegen, Figma push)    |   ✓   |   ✓    |        |
+| Manage members and model access                     |   ✓   |        |        |
+
+## Contributing
+
+Issues and pull requests are welcome. See [`CONTRIBUTING.md`](CONTRIBUTING.md). Please report
+security issues privately, as described in [`SECURITY.md`](SECURITY.md).
+
+## License
+
+[AGPL-3.0](LICENSE). If you run a modified version as a network service, you must offer its
+users the source of your version.

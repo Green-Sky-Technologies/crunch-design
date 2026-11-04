@@ -30,7 +30,8 @@ export class CryptoError extends Error {
 
 /**
  * Parse a keyring from env-style strings.
- * @param spec "kid1:<base64 32 bytes>,kid2:<base64 32 bytes>"
+ * @param spec "kid1:<base64 32 bytes>,kid2:<base64 32 bytes>", or a single bare "<base64 32 bytes>"
+ *   (id "default"), e.g. the output of `openssl rand -base64 32`
  * @param activeKeyId id used for new encryptions (defaults to the first entry)
  */
 export function parseKeyring(spec: string | undefined, activeKeyId?: string): Keyring {
@@ -40,10 +41,12 @@ export function parseKeyring(spec: string | undefined, activeKeyId?: string): Ke
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)) {
+    // base64 never contains ':', so an entry without one is a bare key with the default id.
     const idx = entry.indexOf(':');
-    if (idx <= 0) throw new CryptoError('Malformed master key entry (expected id:base64)');
-    const id = entry.slice(0, idx);
-    const key = Buffer.from(entry.slice(idx + 1), 'base64');
+    if (idx === 0) throw new CryptoError('Malformed master key entry (expected id:base64)');
+    const id = idx < 0 ? 'default' : entry.slice(0, idx);
+    if (keys.has(id)) throw new CryptoError(`Duplicate master key id "${id}"`);
+    const key = Buffer.from(idx < 0 ? entry : entry.slice(idx + 1), 'base64');
     if (key.length !== KEY_BYTES) throw new CryptoError(`Master key "${id}" must be 32 bytes`);
     if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new CryptoError(`Invalid master key id "${id}"`);
     keys.set(id, key);

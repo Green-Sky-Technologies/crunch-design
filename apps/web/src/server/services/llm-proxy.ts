@@ -2,7 +2,9 @@
  * LLM proxy (Story 5.2): every model call, interactive or from a sandbox, goes through here.
  *
  * - Resolves the workspace credential server-side via loadWorkspaceClient (the only path to
- *   decrypted material) and routes to the workspace's provider (Anthropic/Bedrock/Vertex/Foundry).
+ *   decrypted material) and routes to the workspace's provider (Anthropic/Bedrock/Vertex/Foundry/
+ *   AI Gateway key), or to the deployment's Vercel AI Gateway when the workspace has no working
+ *   credential. Gateway tokens stay server-side like every other credential.
  * - Enforces the workspace's allowed models and maps ids per provider (providerModelId).
  * - Calls the budget hook (a no-op in beta, SPEC D18) before spending.
  * - Records every call in llm_calls: tokens in/out, cache read/write, latency, estimated cost, task.
@@ -27,7 +29,7 @@ import {
 } from '@crunch/agent';
 import type { JobKind } from '@crunch/contracts';
 import { llmCalls, type Db, type JobRow } from '@crunch/db';
-import { providerModelId, type Provider } from '@crunch/providers';
+import { providerModelId, redact, type Provider } from '@crunch/providers';
 import { z } from 'zod';
 import { JobTokenError, tokenFromHeaders, verifyJobToken } from './agent/job-tokens';
 import { getModelSettings } from './agent/model-settings';
@@ -123,7 +125,7 @@ function toProviderError(err: unknown): ProviderError {
     // message goes to server logs (truncated, never the request body) so 4xx causes are
     // diagnosable from Vercel logs.
     if (status < 500) {
-      const detail = String(body?.error?.message ?? err.message ?? '').slice(0, 500);
+      const detail = redact(String(body?.error?.message ?? err.message ?? ''), []).slice(0, 500);
       console.error(
         `[llm-proxy] provider ${status} ${type}: ${detail} (request ${err.requestID ?? '-'})`,
       );

@@ -42,9 +42,9 @@ inputs, design-system import from a code repo.
 | Assets | **Vercel Blob** | Uploads, screenshots, thumbnails, export ZIPs. |
 | Interactive agent | **Anthropic TS SDK (Messages API + tool use)** in Vercel Functions | Quick edits: chat tweaks, inline comments. Streams over **SSE**. |
 | Long-running agent | **Claude Agent SDK** in **Vercel Sandbox** | Full generation, redesign, DS import, web capture, code export, Figma export. |
-| Model access | **BYOK, Claude routes only** | Anthropic API, Amazon Bedrock, Google Vertex AI, Azure AI Foundry. Workspace-level credentials. |
+| Model access | **Vercel AI Gateway by default, optional BYOK; Claude only** | Deployment-wide AI Gateway; workspaces can add their own Anthropic API, Amazon Bedrock, Google Vertex AI, Azure AI Foundry or AI Gateway key. |
 | Figma | **CrunchDesign Figma plugin** + Figma REST API (read) | The plugin is the only way to write nodes into Figma. |
-| Infra as code | **OpenTofu** | Vercel, Neon, Clerk config, and any future AWS resources. |
+| Setup | **Vercel only** | Deploy Button provisions Neon, Clerk and Blob; the build migrates the database and configures Clerk (`scripts/vercel-build.mjs`). No IaC tool to learn. |
 | Monorepo | **pnpm + Turborepo** | `apps/web`, `apps/figma-plugin`, `packages/doc-model`, `packages/renderer`, `packages/agent-tools`, `packages/sandbox-runner`. |
 
 ### Architecture shape
@@ -65,7 +65,7 @@ Vercel Functions (Node/TS)
       └── Claude Agent SDK ── ANTHROPIC_BASE_URL ──┘ (short-lived job token, never the real key)
           └── agent tools → call back to Job API to apply DesignDoc patches
                                                    ▼
-                     Anthropic API · Bedrock · Vertex · Foundry (workspace BYOK)
+   Vercel AI Gateway (deployment default) · Anthropic API · Bedrock · Vertex · Foundry (workspace BYOK)
 Figma (CrunchDesign plugin) ── REST, plugin token ──► Vercel Functions
 ```
 
@@ -127,9 +127,16 @@ can run **deterministic exports**: HTML/ZIP, handoff bundle, open share links).
 LLM-backed exports (React + Tailwind codegen, Figma push) require Editor, since
 they spend the workspace key.
 
-**Model credentials:** BYOK, **workspace-level only** (no personal keys in v1).
-- Supported routes: Anthropic API key · Amazon Bedrock · Google Vertex AI · Azure
-  AI Foundry.
+**Model access:** the **deployment's Vercel AI Gateway** by default, with optional
+**workspace-level BYOK** (no personal keys in v1).
+- Deployment gateway: on when running on Vercel (`VERCEL`) or when `AI_GATEWAY_API_KEY`
+  is set; `CRUNCH_AI_GATEWAY=on|off` overrides. Auth is `AI_GATEWAY_API_KEY`, else the
+  Vercel OIDC token (fetched per request). Usage bills to the hosting Vercel team.
+- Precedence: a workspace credential that passed its test → the deployment gateway →
+  any other saved credential → no model access. Calls are metered with provider
+  `gateway`; model ids map to `anthropic/claude-…` (`providerModelId`).
+- Supported BYOK routes: Anthropic API key · Amazon Bedrock · Google Vertex AI · Azure
+  AI Foundry · Vercel AI Gateway key (bills the workspace's own Vercel team).
 - Bedrock: prefer **cross-account IAM role assumption** (role ARN + external ID
   that we generate) over static access keys. Static keys are allowed as a fallback.
 - Vertex: service-account JSON or Workload Identity Federation.
@@ -254,14 +261,15 @@ create an empty project.*
 
 - **1.1 Monorepo scaffold.** pnpm + Turborepo, TS strict, ESLint/Prettier, Vitest,
   Playwright. AC: `pnpm dev` runs the web app; CI runs lint, typecheck and tests on PRs.
-- **1.2 Infra as code.** OpenTofu for the Vercel project and env vars, Neon project
-  and branches, Blob store. AC: `tofu apply` recreates staging from scratch; every
-  preview deploy gets its own Neon branch.
+- **1.2 One-click setup (revised: OpenTofu dropped for open source).** A Vercel Deploy
+  Button provisions Neon, Clerk and Blob; the build applies migrations and configures Clerk.
+  AC: a fresh Deploy Button run yields a working app with no steps beyond two generated
+  secrets; with the Neon integration, every preview deploy gets its own Neon branch.
 - **1.3 Clerk auth + workspaces.** Clerk Organizations mapped to workspaces;
   a webhook syncs orgs and members into Postgres. AC: Admin/Editor/Viewer enforced
   server-side on every route; a user without a workspace is guided to create or join one.
 - **1.4 Provider credentials.** An Admin adds, tests, rotates and removes one
-  credential per workspace (Anthropic / Bedrock role / Vertex / Foundry). AC:
+  credential per workspace (Anthropic / Bedrock role / Vertex / Foundry / AI Gateway). AC:
   envelope-encrypted at rest; a test-connection call succeeds or shows a provider
   error; the secret is never returned to the client or written to logs (covered by tests).
 - **1.5 Spend caps — deferred (beta).** Keep a no-op `checkBudget()` hook in the
@@ -465,7 +473,7 @@ place); import a Figma frame; sync tokens with Figma variables.*
   view before applying, in either direction. AC: conflicts are shown, never auto-resolved.
 
 ### Epic 9 — Operations & Security
-- **9.1 Environments.** Preview (per PR), staging, production, all in OpenTofu.
+- **9.1 Environments.** Preview (per PR) and production on Vercel; previews get Neon branches.
 - **9.2 Observability.** Structured logs (with secret redaction), error tracking,
   job and LLM dashboards, alerts on job failure rate and proxy errors.
 - **9.3 Security review.** Authorization tests for every route (IDOR), CSP for
@@ -501,11 +509,11 @@ runner to AWS Fargate (only if scale demands it).
 | D1 | Live HTML frames from a JSON doc tree, not a vector scene graph | Matches the LLM's strongest output format and code handoff; WYSIWYG still possible (Framer/Webflow model). |
 | D2 | Flow-first drag + absolute opt-in | Keeps exports responsive, real CSS. |
 | D3 | Async teams, soft lock + presence | No merge conflicts; the agent acts for one editor. |
-| D4 | Vercel-first; OpenTofu for IaC | Single platform; AWS only if a workload demands it. |
+| D4 | Vercel-only; no IaC tool (OpenTofu dropped when open-sourcing) | Single platform, one-click deploy for self-hosters. |
 | D5 | Split agent runtime: Messages API (interactive) + Agent SDK in Vercel Sandbox (long jobs) | Fast and cheap small edits; Agent SDK for long multi-step jobs. Sandbox costs ~cents per job. |
 | D6 | SSE instead of WebSockets | Vercel Functions don't hold WebSockets; SSE with resume suffices. |
 | D7 | Clerk, Orgs = Workspaces | Fast to ship; roles built in. |
-| D8 | BYOK, workspace key only, Claude routes only | Clean economics; one model family to tune. |
+| D8 | Deployment AI Gateway by default, optional workspace BYOK; Claude routes only | Zero setup for self-hosters; workspaces can still bill their own account. One model family to tune. |
 | D9 | LLM proxy; real keys never enter sandboxes | Prompt-injection safety, metering, caps. |
 | D10 | Free beta, no billing in v1 | Gather real usage data first. |
 | D11 | Export v1: share link, HTML/ZIP, handoff bundle, React + Tailwind | Highest value, lowest cost. |

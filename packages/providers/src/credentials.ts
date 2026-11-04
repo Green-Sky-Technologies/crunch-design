@@ -10,7 +10,7 @@
  */
 import { z } from 'zod';
 
-export const PROVIDERS = ['anthropic', 'bedrock', 'vertex', 'foundry'] as const;
+export const PROVIDERS = ['anthropic', 'bedrock', 'vertex', 'foundry', 'gateway'] as const;
 export type Provider = (typeof PROVIDERS)[number];
 
 export const PROVIDER_LABELS: Record<Provider, string> = {
@@ -18,6 +18,7 @@ export const PROVIDER_LABELS: Record<Provider, string> = {
   bedrock: 'Amazon Bedrock',
   vertex: 'Google Vertex AI',
   foundry: 'Microsoft Foundry',
+  gateway: 'Vercel AI Gateway',
 };
 
 const region = z
@@ -84,7 +85,19 @@ export const foundryInput = z.object({
   apiKey: z.string().trim().min(16).max(512),
 });
 
-export const credentialInput = z.union([anthropicInput, bedrockInput, vertexInput, foundryInput]);
+/** An AI Gateway API key from the workspace's own Vercel team (usage bills to that team). */
+export const gatewayInput = z.object({
+  provider: z.literal('gateway'),
+  apiKey: z.string().trim().min(16, 'API key looks too short').max(512),
+});
+
+export const credentialInput = z.union([
+  anthropicInput,
+  bedrockInput,
+  vertexInput,
+  foundryInput,
+  gatewayInput,
+]);
 export type CredentialInput = z.infer<typeof credentialInput>;
 
 // ---- Stored shapes ----
@@ -106,6 +119,7 @@ export const storedConfig = z.discriminatedUnion('provider', [
     clientEmail: z.string(),
   }),
   z.object({ provider: z.literal('foundry'), resource: z.string() }),
+  z.object({ provider: z.literal('gateway') }),
 ]);
 export type StoredConfig = z.infer<typeof storedConfig>;
 
@@ -114,6 +128,7 @@ export const storedSecret = z.discriminatedUnion('provider', [
   z.object({ provider: z.literal('bedrock'), secretAccessKey: z.string().optional() }),
   z.object({ provider: z.literal('vertex'), serviceAccountJson: z.string() }),
   z.object({ provider: z.literal('foundry'), apiKey: z.string() }),
+  z.object({ provider: z.literal('gateway'), apiKey: z.string() }),
 ]);
 export type StoredSecret = z.infer<typeof storedSecret>;
 
@@ -180,6 +195,12 @@ export function splitCredential(input: CredentialInput, externalId: string): Spl
       return {
         config: { provider: 'foundry', resource: input.resource },
         secret: { provider: 'foundry', apiKey: input.apiKey },
+        hint: last4(input.apiKey),
+      };
+    case 'gateway':
+      return {
+        config: { provider: 'gateway' },
+        secret: { provider: 'gateway', apiKey: input.apiKey },
         hint: last4(input.apiKey),
       };
   }
@@ -265,6 +286,7 @@ export function redact(text: string, secrets: string[]): string {
   // Belt and braces: well-known key prefixes.
   return out
     .replace(/sk-ant-[A-Za-z0-9_-]{8,}/g, '[REDACTED]')
+    .replace(/vck_[A-Za-z0-9_-]{8,}/g, '[REDACTED]')
     .replace(
       /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
       '[REDACTED]',

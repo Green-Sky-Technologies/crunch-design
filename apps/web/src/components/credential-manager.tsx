@@ -13,15 +13,23 @@ const OPTIONS: { id: Provider; label: string; blurb: string }[] = [
   { id: 'bedrock', label: 'Amazon Bedrock', blurb: 'Claude in your AWS account.' },
   { id: 'vertex', label: 'Google Vertex AI', blurb: 'Claude in your Google Cloud project.' },
   { id: 'foundry', label: 'Microsoft Foundry', blurb: 'Claude in your Azure Foundry resource.' },
+  { id: 'gateway', label: 'Vercel AI Gateway', blurb: 'An AI Gateway key from your Vercel team.' },
 ];
 
 interface Props {
+  /** The deployment's Vercel AI Gateway serves workspaces without a working key of their own. */
+  deploymentGateway: boolean;
   initial: PublicCredential | null;
   externalId: string;
   awsPrincipalArn: string | null;
 }
 
-export function CredentialManager({ initial, externalId, awsPrincipalArn }: Props) {
+export function CredentialManager({
+  deploymentGateway,
+  initial,
+  externalId,
+  awsPrincipalArn,
+}: Props) {
   const [cred, setCred] = useState(initial);
   const [editing, setEditing] = useState(!initial);
   const [error, setError] = useState<string | null>(null);
@@ -36,67 +44,7 @@ export function CredentialManager({ initial, externalId, awsPrincipalArn }: Prop
       } else setError(res.error);
     });
 
-  if (cred && !editing) {
-    return (
-      <div className="card p-5">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="font-medium">{cred.providerLabel}</p>
-            <p className="font-mono text-sm text-muted">{cred.hint}</p>
-          </div>
-          <StatusBadge status={cred.status} />
-        </div>
-        {Object.keys(cred.details).length > 0 && (
-          <dl className="mt-4 grid grid-cols-[max-content_1fr] gap-x-6 gap-y-1 text-sm">
-            {Object.entries(cred.details).map(([k, v]) => (
-              <div key={k} className="contents">
-                <dt className="text-muted">{k}</dt>
-                <dd className="break-all font-mono">{v}</dd>
-              </div>
-            ))}
-          </dl>
-        )}
-        {cred.status === 'error' && cred.lastError && (
-          <p className="mt-4 rounded-md bg-surface-2 p-3 text-sm text-danger">{cred.lastError}</p>
-        )}
-        {cred.lastTestedAt && (
-          <p className="mt-3 text-xs text-muted">
-            Last tested {new Date(cred.lastTestedAt).toLocaleString()}
-          </p>
-        )}
-        {error && <p className="mt-3 text-sm text-danger">{error}</p>}
-        <div className="mt-5 flex gap-2">
-          <button
-            className="btn-ghost"
-            disabled={pending}
-            onClick={() => runAction(testCredentialAction)}
-          >
-            {pending ? 'Testing…' : 'Test connection'}
-          </button>
-          <button className="btn-ghost" disabled={pending} onClick={() => setEditing(true)}>
-            Replace
-          </button>
-          <button
-            className="btn-danger ml-auto"
-            disabled={pending}
-            onClick={() =>
-              start(async () => {
-                const res = await deleteCredentialAction();
-                if (res.ok) {
-                  setCred(null);
-                  setEditing(true);
-                } else setError(res.error);
-              })
-            }
-          >
-            Remove
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
+  const form = (
     <CredentialForm
       externalId={externalId}
       awsPrincipalArn={awsPrincipalArn}
@@ -106,6 +54,118 @@ export function CredentialManager({ initial, externalId, awsPrincipalArn }: Prop
         setEditing(false);
       }}
     />
+  );
+
+  const card = cred && (
+    <div className="card p-5">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="font-medium">{cred.providerLabel}</p>
+          <p className="font-mono text-sm text-muted">{cred.hint}</p>
+        </div>
+        <StatusBadge status={cred.status} />
+      </div>
+      {Object.keys(cred.details).length > 0 && (
+        <dl className="mt-4 grid grid-cols-[max-content_1fr] gap-x-6 gap-y-1 text-sm">
+          {Object.entries(cred.details).map(([k, v]) => (
+            <div key={k} className="contents">
+              <dt className="text-muted">{k}</dt>
+              <dd className="break-all font-mono">{v}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {cred.status === 'error' && cred.lastError && (
+        <p className="mt-4 rounded-md bg-surface-2 p-3 text-sm text-danger">{cred.lastError}</p>
+      )}
+      {cred.lastTestedAt && (
+        <p className="mt-3 text-xs text-muted">
+          Last tested {new Date(cred.lastTestedAt).toLocaleString()}
+        </p>
+      )}
+      {error && <p className="mt-3 text-sm text-danger">{error}</p>}
+      <div className="mt-5 flex gap-2">
+        <button
+          className="btn-ghost"
+          disabled={pending}
+          onClick={() => runAction(testCredentialAction)}
+        >
+          {pending ? 'Testing…' : 'Test connection'}
+        </button>
+        <button className="btn-ghost" disabled={pending} onClick={() => setEditing(true)}>
+          Replace
+        </button>
+        <button
+          className="btn-danger ml-auto"
+          disabled={pending}
+          onClick={() =>
+            start(async () => {
+              const res = await deleteCredentialAction();
+              if (res.ok) {
+                setCred(null);
+                setEditing(true);
+              } else setError(res.error);
+            })
+          }
+        >
+          Remove
+        </button>
+      </div>
+    </div>
+  );
+
+  const own = cred && !editing ? card : form;
+  if (!deploymentGateway) return own;
+
+  // Deployment gateway on: it leads; a workspace key is optional and takes over once it works.
+  const ownKeyInUse = cred?.status === 'ok';
+  return (
+    <div className="grid gap-6">
+      <GatewayCard active={!ownKeyInUse} />
+      {cred ? (
+        <section>
+          <h2 className="mb-1 font-medium">Your own key</h2>
+          <p className="mb-3 text-sm text-muted">
+            {ownKeyInUse
+              ? 'In use instead of the gateway. Remove it to fall back to the gateway.'
+              : 'Not in use until it passes a test. The gateway is used meanwhile.'}
+          </p>
+          {own}
+        </section>
+      ) : (
+        <details>
+          <summary className="cursor-pointer text-sm font-medium text-muted hover:text-text">
+            Use your own key instead
+          </summary>
+          <p className="mb-3 mt-2 text-sm text-muted">
+            Bill usage to your own provider account or Vercel team. A key that passes its test
+            replaces the gateway for this workspace.
+          </p>
+          {own}
+        </details>
+      )}
+    </div>
+  );
+}
+
+function GatewayCard({ active }: { active: boolean }) {
+  return (
+    <div className="card p-5">
+      <div className="flex items-start justify-between gap-4">
+        <p className="font-medium">Vercel AI Gateway</p>
+        <span
+          className={`rounded-full bg-surface-2 px-2 py-0.5 text-xs font-medium ${active ? 'text-ok' : 'text-muted'}`}
+        >
+          ● {active ? 'In use' : 'Standby'}
+        </span>
+      </div>
+      <p className="mt-2 text-sm">
+        Models are provided by this deployment&apos;s Vercel AI Gateway. No setup needed.
+      </p>
+      <p className="mt-1 text-sm text-muted">
+        Usage is billed to the Vercel team that hosts this deployment.
+      </p>
+    </div>
   );
 }
 
@@ -202,7 +262,7 @@ function CredentialForm({
       </fieldset>
 
       <div className="mt-5 grid gap-4" key={provider}>
-        {provider === 'anthropic' && (
+        {(provider === 'anthropic' || provider === 'gateway') && (
           <div>
             <label className="label" htmlFor="apiKey">
               API key
@@ -213,7 +273,7 @@ function CredentialForm({
               type="password"
               autoComplete="off"
               className="input font-mono"
-              placeholder="sk-ant-…"
+              placeholder={provider === 'gateway' ? 'vck_…' : 'sk-ant-…'}
               required
             />
             {err('apiKey')}

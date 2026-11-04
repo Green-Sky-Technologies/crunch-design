@@ -16,7 +16,8 @@
     "db:up": "docker compose up -d db",
     "db:generate": "pnpm --filter @crunch/db generate",
     "db:migrate": "pnpm --filter @crunch/db migrate",
-    "keygen": "node scripts/keygen.mjs"
+    "keygen": "node scripts/keygen.mjs",
+    "setup:clerk": "node scripts/setup-clerk.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
@@ -28,5 +29,6 @@
     "typescript": "^5",
     "typescript-eslint": "^8.72.1",
     "vitest": "^5.1.0"
-  }
+  },
+  "license": "AGPL-3.0-only"
 }

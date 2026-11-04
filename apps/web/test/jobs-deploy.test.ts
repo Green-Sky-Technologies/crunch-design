@@ -15,11 +15,13 @@ afterAll(close);
 beforeEach(() => reset(db));
 
 describe('cron', () => {
-  it('schedules the reaper in apps/web/vercel.json', () => {
+  it('schedules the reaper in apps/web/vercel.json (daily: the Hobby plan limit)', () => {
     const cfg = JSON.parse(
       readFileSync(fileURLToPath(new URL('../vercel.json', import.meta.url)), 'utf8'),
     );
-    expect(cfg.crons).toContainEqual({ path: '/api/jobs/reap', schedule: '* * * * *' });
+    // Daily so free-tier deploys succeed; job status reads also run the reaper about once a
+    // minute (opportunistic-reap.ts).
+    expect(cfg.crons).toContainEqual({ path: '/api/jobs/reap', schedule: '0 4 * * *' });
   });
 
   it('accepts exactly the header Vercel Cron sends, and stays closed without a secret', () => {

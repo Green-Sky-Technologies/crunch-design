@@ -2,7 +2,6 @@ pnpm-lock.yaml
 .next
 dist
 SPEC*.md
-infra/**/.terraform
 next-env.d.ts
 .clerk
 playwright-report

@@ -6,7 +6,8 @@
  * Cache reads are 0.1× input except Opus 5.5 (0.05×, $0.20) and Fable 5.1 (0.025×, $0.25).
  * Prices are Anthropic first-party list prices in USD per million tokens, taken from
  * Anthropic's pricing documentation (checked 2026-10-06). Bedrock and Vertex bill at partner
- * rates, so costs on those routes are estimates. Re-check before relying on reconciliation
+ * rates, so costs on those routes are estimates. Vercel AI Gateway passes through provider list
+ * prices. Re-check before relying on reconciliation
  * (Story 5.10 AC: within ±5% of provider usage).
  */
 import { MODEL_TIERS, type ModelTier } from '@crunch/providers';
@@ -77,8 +78,13 @@ export const MODELS: readonly ModelInfo[] = [
 
 const BY_ID = new Map(MODELS.map((m) => [m.id, m]));
 
-/** Strip provider prefixes (Bedrock's `anthropic.`) to get the first-party id. */
+/**
+ * Strip provider prefixes to get the first-party id: Bedrock's `anthropic.` and AI Gateway's
+ * `anthropic/` (whose dotted version, `claude-opus-5.5`, becomes `claude-opus-5-5`).
+ */
 export function baseModelId(model: string): string {
+  if (model.startsWith('anthropic/'))
+    return model.slice('anthropic/'.length).replace(/^(claude-[a-z]+-\d+)\.(\d+)$/, '$1-$2');
   return model.replace(/^(?:[a-z]{2}\.)?anthropic\./, '');
 }
 

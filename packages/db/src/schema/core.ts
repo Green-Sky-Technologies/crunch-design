@@ -25,7 +25,13 @@ export const timestamps = {
 };
 
 export const roleEnum = pgEnum('member_role', ['admin', 'editor', 'viewer']);
-export const providerEnum = pgEnum('model_provider', ['anthropic', 'bedrock', 'vertex', 'foundry']);
+export const providerEnum = pgEnum('model_provider', [
+  'anthropic',
+  'bedrock',
+  'vertex',
+  'foundry',
+  'gateway',
+]);
 export const credentialStatusEnum = pgEnum('credential_status', ['untested', 'ok', 'error']);
 
 /** Mirror of Clerk users (synced by webhook and lazily on request). */

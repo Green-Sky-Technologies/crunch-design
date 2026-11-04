@@ -30,6 +30,7 @@
     "@crunch/renderer": "workspace:*",
     "@crunch/sandbox-runner": "workspace:*",
     "@vercel/blob": "^2.8.2",
+    "@vercel/oidc": "^4.0.0",
     "next": "16.4.5",
     "react": "19.3.0",
     "react-dom": "19.3.0",

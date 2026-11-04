@@ -53,6 +53,19 @@ describe('envelope encryption', () => {
   it('validates keyring input', () => {
     expect(() => parseKeyring(undefined)).toThrow();
     expect(() => parseKeyring('k1:short')).toThrow(/32 bytes/);
+    expect(() => parseKeyring(':abc')).toThrow(/Malformed/);
+    expect(() => parseKeyring(`${generateMasterKey()},${generateMasterKey()}`)).toThrow(
+      /Duplicate/,
+    );
     expect(() => parseKeyring(`k1:${k1}`, 'nope')).toThrow(/Active/);
+  });
+
+  it('accepts a single bare key (openssl rand -base64 32) under the id "default"', () => {
+    const k = generateMasterKey();
+    const ring = parseKeyring(k);
+    expect(ring.activeKeyId).toBe('default');
+    // A later rotation keeps the bare key readable alongside a named one.
+    const rotated = parseKeyring(`k2:${generateMasterKey()},${k}`, 'k2');
+    expect([...rotated.keys.keys()]).toEqual(['k2', 'default']);
   });
 });
