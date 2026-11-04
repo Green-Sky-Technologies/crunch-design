@@ -24,6 +24,7 @@ import {
 } from '@crunch/db';
 import {
   componentDef,
+  designSystemSpec,
   starterDesignSystem,
   tokenDef,
   type ComponentDef,
@@ -111,9 +112,10 @@ function specError(issues: SpecIssue[]): ValidationError {
 /** The spec a row's draft represents (the starter until first edited). */
 export function draftSpecOf(row: Pick<DesignSystem, 'draft'>): DesignSystemSpec {
   if (row.draft == null) return starterDesignSystem();
-  const r = safeParseSpec(row.draft);
-  // Stored drafts are validated on write; a legacy/invalid row falls back rather than crashing.
-  return r.ok ? r.spec : starterDesignSystem();
+  // Shape-only on read: a draft stored before an invariant was tightened still loads (the editor
+  // shows its issues and won't save until they're fixed) instead of silently becoming the starter.
+  const r = designSystemSpec.safeParse(row.draft);
+  return r.success ? r.data : starterDesignSystem();
 }
 
 export const revisionOf = (row: Pick<DesignSystem, 'updatedAt'>) => String(row.updatedAt.getTime());
@@ -153,7 +155,8 @@ async function versionSpec(
       ),
     )
     .limit(1);
-  return v ? validateSpecOrThrow(v.spec) : null;
+  // Shape-only on read: immutable versions stay readable if invariants are tightened later.
+  return v ? designSystemSpec.parse(v.spec) : null;
 }
 
 async function versionId(

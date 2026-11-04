@@ -9,10 +9,14 @@
  */
 import {
   designSystemSpec,
+  isTokenRef,
   isValidTokenValue,
   LEAF_TYPES,
+  safeImageSrc,
+  STYLE_PROPS,
   type ComponentDef,
   type DesignSystemSpec,
+  type ResponsiveStyle,
   type TokenType,
 } from '@crunch/doc-model';
 
@@ -77,6 +81,53 @@ function checkTokens(spec: DesignSystemSpec, issues: SpecIssue[]) {
       } else if (!isValidTokenValue(def.type, value)) {
         issues.push({ path: at, message: `Invalid ${def.type} value` });
       }
+    }
+    // Alias cycles with the theme layered over the base values (e.g. a theme aliasing a token to
+    // itself, or base a → b plus theme b → a).
+    const valueOf = (p: string) => (p in overrides ? overrides[p] : tokens[p]?.value);
+    for (const path of Object.keys(overrides)) {
+      const seen = new Set<string>([path]);
+      let v = valueOf(path);
+      while (v !== undefined && typeof v === 'object') {
+        if (seen.has(v.ref)) {
+          issues.push({
+            path: `themes.${theme}.${path}`,
+            message: `Alias cycle through "${v.ref}" in theme ${theme}`,
+          });
+          break;
+        }
+        seen.add(v.ref);
+        v = valueOf(v.ref);
+      }
+    }
+  }
+}
+
+/** Every `{token}` in a style must exist and be a type the prop accepts. */
+function checkStyleTokens(
+  style: ResponsiveStyle | undefined,
+  spec: DesignSystemSpec,
+  at: string,
+  out: SpecIssue[],
+) {
+  if (!style) return;
+  for (const bp of ['base', 'md', 'lg'] as const) {
+    const props = style[bp];
+    if (!props) continue;
+    for (const [prop, value] of Object.entries(props)) {
+      if (!isTokenRef(value)) continue;
+      const def = spec.tokens[value.token];
+      const p = `${at}.style.${bp}.${prop}`;
+      if (!def) {
+        out.push({ path: p, message: `Uses unknown token "${value.token}"` });
+        continue;
+      }
+      const kinds = (STYLE_PROPS as Record<string, { tokens?: readonly string[] }>)[prop]?.tokens;
+      if (!kinds?.includes(def.type))
+        out.push({
+          path: p,
+          message: `${prop} can't use ${def.type} token "${value.token}"`,
+        });
     }
   }
 }
@@ -173,6 +224,19 @@ function checkComponent(key: string, c: ComponentDef, spec: DesignSystemSpec, ou
       out.push({
         path: `${at}.nodes.${n.id}`,
         message: `Nested instance of unknown component "${n.componentRef.componentId}"`,
+      });
+    checkStyleTokens(n.style, spec, `${at}.nodes.${n.id}`, out);
+  }
+  c.variantStyles.forEach((vs, i) =>
+    checkStyleTokens(vs.style, spec, `${at}.variantStyles.${i}`, out),
+  );
+
+  // Image prop defaults reach <img src> through bindings: same URL rules as image nodes.
+  for (const [name, p] of Object.entries(c.props)) {
+    if (p.type === 'image' && !safeImageSrc.safeParse(p.default).success)
+      out.push({
+        path: `${at}.props.${name}.default`,
+        message: 'Image default must be https, an app asset path, or a base64 raster data URL',
       });
   }
 }

@@ -27,6 +27,7 @@ import {
 } from '@/server/services/project-design-system';
 import { createProject, getProject } from '@/server/services/projects';
 import { NotFoundError, ValidationError } from '@/server/services/types';
+import { PLACEHOLDER_IMAGE } from '@/features/design-system/editor/components-panel';
 import { makeActor, reset, testDb } from './helpers';
 
 const { db, close } = testDb();
@@ -122,6 +123,51 @@ describe('spec validation', () => {
     };
     expect(safeParseSpec(selfNest).ok).toBe(false);
   });
+
+  it('rejects component styles that use missing or wrong-type tokens', () => {
+    const noRadius = starterDesignSystem();
+    delete noRadius.tokens['radius.md']; // used by the starter Button
+    const r = safeParseSpec(noRadius);
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.issues[0]!.message).toMatch(/unknown token "radius.md"/);
+
+    const wrongKind = starterDesignSystem();
+    wrongKind.components.Button!.nodes.n_btnroot01!.style.base!.paddingTop = {
+      token: 'color.primary',
+    };
+    expect(safeParseSpec(wrongKind).ok).toBe(false);
+
+    const variantRef = starterDesignSystem();
+    variantRef.components.Button!.variantStyles[0]!.style.base!.borderColor = {
+      token: 'color.gone',
+    };
+    expect(safeParseSpec(variantRef).ok).toBe(false);
+  });
+
+  it('rejects alias cycles that only exist inside a theme', () => {
+    const self = starterDesignSystem();
+    self.themes.dark!['color.text'] = { ref: 'color.text' };
+    expect(safeParseSpec(self).ok).toBe(false);
+
+    const loop = starterDesignSystem();
+    loop.tokens['color.link'] = { type: 'color', value: { ref: 'color.primary' } };
+    loop.themes.dark!['color.primary'] = { ref: 'color.link' };
+    expect(safeParseSpec(loop).ok).toBe(false);
+
+    const fine = starterDesignSystem();
+    fine.themes.dark!['color.primary'] = { ref: 'color.accent' };
+    expect(safeParseSpec(fine).ok).toBe(true);
+  });
+
+  it('image prop defaults must be safe image URLs', () => {
+    const spec = starterDesignSystem();
+    spec.components.Button!.props.icon = { type: 'image', default: 'javascript:alert(1)' };
+    expect(safeParseSpec(spec).ok).toBe(false);
+    spec.components.Button!.props.icon = { type: 'image', default: '' };
+    expect(safeParseSpec(spec).ok).toBe(false);
+    spec.components.Button!.props.icon = { type: 'image', default: PLACEHOLDER_IMAGE };
+    expect(safeParseSpec(spec).ok).toBe(true);
+  });
 });
 
 describe('design systems', () => {
@@ -173,6 +219,10 @@ describe('design systems', () => {
     await expect(
       setDesignSystemToken(db, editor, ds.id, 'color.primary', null),
     ).rejects.toBeInstanceOf(ValidationError);
+    // ...and neither can one a component uses
+    await expect(setDesignSystemToken(db, editor, ds.id, 'radius.md', null)).rejects.toBeInstanceOf(
+      ValidationError,
+    );
     await setDesignSystemToken(db, editor, ds.id, 'color.link', null);
     // deleting removes theme overrides too
     await setDesignSystemToken(db, editor, ds.id, 'color.muted', null);

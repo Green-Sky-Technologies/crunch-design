@@ -8,6 +8,9 @@ import { IssueList, issuesAt, SectionTitle, type PanelProps, type Update } from 
 
 const COMPONENT_ID = /^[a-zA-Z][\w-]{0,63}$/;
 const PROP_NAME = /^[a-zA-Z]\w{0,63}$/;
+/** A valid default for new image props (1×1 transparent PNG); image defaults must be safe URLs. */
+export const PLACEHOLDER_IMAGE =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
 
 /** A new component: a box with one text label bound to a `label` prop. */
 export function newComponent(id: string, name: string): ComponentDef {
@@ -290,7 +293,11 @@ function ComponentEditor({
                     edit((d) => {
                       const t = e.target.value as 'text' | 'boolean' | 'image';
                       d.props[name] =
-                        t === 'boolean' ? { type: t, default: true } : { type: t, default: '' };
+                        t === 'boolean'
+                          ? { type: t, default: true }
+                          : t === 'image'
+                            ? { type: t, default: PLACEHOLDER_IMAGE }
+                            : { type: t, default: '' };
                     })
                   }
                 >
