@@ -1,0 +1,22 @@
+{
+  "name": "@crunch/providers",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "test": "vitest run",
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "@anthropic-ai/bedrock-sdk": "^1.1.1",
+    "@anthropic-ai/foundry-sdk": "^1.1.1",
+    "@anthropic-ai/sdk": "^1.4.0",
+    "@anthropic-ai/vertex-sdk": "^1.1.1",
+    "@aws-sdk/client-sts": "^3.1161.0",
+    "google-auth-library": "^10.9.1",
+    "zod": "^4.6.7"
+  }
+}

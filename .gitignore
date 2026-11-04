@@ -1,0 +1,21 @@
+node_modules/
+.next/
+out/
+dist/
+coverage/
+.turbo/
+*.tsbuildinfo
+.env
+.env*.local
+.vercel/
+.DS_Store
+# OpenTofu
+infra/**/.terraform/
+infra/**/*.tfstate
+infra/**/*.tfstate.*
+infra/**/*.tfvars
+!infra/**/*.tfvars.example
+# Playwright
+playwright-report/
+test-results/
+.clerk/

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "globalEnv": ["NODE_ENV"],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": [".next/**", "!.next/cache/**", "dist/**"],
+      "env": [
+        "NEXT_PUBLIC_*",
+        "CLERK_*",
+        "DATABASE_URL",
+        "CREDENTIALS_MASTER_KEY",
+        "BLOB_READ_WRITE_TOKEN"
+      ]
+    },
+    "dev": { "cache": false, "persistent": true },
+    "lint": {},
+    "typecheck": { "dependsOn": ["^typecheck"] },
+    "test": { "dependsOn": ["^build"], "env": ["DATABASE_URL"] }
+  }
+}

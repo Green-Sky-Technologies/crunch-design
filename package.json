@@ -1,0 +1,32 @@
+{
+  "name": "crunchdesign",
+  "private": true,
+  "packageManager": "pnpm@10.9.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "db:up": "docker compose up -d db",
+    "db:generate": "pnpm --filter @crunch/db generate",
+    "db:migrate": "pnpm --filter @crunch/db migrate",
+    "keygen": "node scripts/keygen.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@types/node": "^22.20.5",
+    "eslint": "^9.39.5",
+    "prettier": "^3",
+    "tsx": "^4.23.15",
+    "turbo": "^2.11.10",
+    "typescript": "^5",
+    "typescript-eslint": "^8.72.1",
+    "vitest": "^5.1.0"
+  }
+}

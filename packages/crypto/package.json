@@ -1,0 +1,13 @@
+{
+  "name": "@crunch/crypto",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "test": "vitest run",
+    "lint": "eslint src"
+  }
+}
