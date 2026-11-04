@@ -265,10 +265,15 @@ export const designDoc = z
     frames: z.array(frame).max(200),
     nodes: z.record(id, node),
     sliders: z.array(slider).max(100).default([]),
+    /**
+     * Project-local token overrides on top of the design system (slider token bindings,
+     * quick experiments). Values are validated against the token's type at render time.
+     */
+    tokenOverrides: z.record(tokenPath, z.union([z.string().max(400), z.number()])).default({}),
   })
   .strict();
 export type DesignDoc = z.infer<typeof designDoc>;
 
 export function emptyDoc(): DesignDoc {
-  return { schemaVersion: SCHEMA_VERSION, frames: [], nodes: {}, sliders: [] };
+  return { schemaVersion: SCHEMA_VERSION, frames: [], nodes: {}, sliders: [], tokenOverrides: {} };
 }

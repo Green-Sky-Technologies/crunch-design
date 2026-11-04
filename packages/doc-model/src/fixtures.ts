@@ -243,5 +243,6 @@ export function sampleLandingDoc(): DesignDoc {
     ],
     nodes,
     sliders: [],
+    tokenOverrides: {},
   };
 }
