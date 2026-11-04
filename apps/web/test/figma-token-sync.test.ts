@@ -1,7 +1,7 @@
 /** Token sync with Figma variables (Story 8.4): diff, pull patch, push plan, sync base. */
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { ForbiddenError } from '@crunch/authz';
-import { eq, figmaVariableLinks } from '@crunch/db';
+import { eq, figmaVariableLinks, projects } from '@crunch/db';
 import { starterDesignSystem, type DesignSystemSpec } from '@crunch/doc-model';
 import {
   tokensToVariables,
@@ -16,6 +16,8 @@ import {
   recordVariablesPush,
   type DraftWriter,
 } from '@/server/services/figma/token-sync';
+import { getDesignSystem } from '@/server/services/design-systems';
+import { designSystemDraftWriter } from '@/server/services/figma/ds-draft-writer';
 import { createProject } from '@/server/services/projects';
 import { NotFoundError, ValidationError, type Actor } from '@/server/services/types';
 import { makeActor, reset, testDb } from './helpers';
@@ -127,6 +129,25 @@ describe('token sync service', () => {
 
     const viewer = await makeActor(db, 'viewer', editor.workspace);
     await expect(pullVariables(db, viewer, projectId, resolved)).rejects.toThrow(ForbiddenError);
+  });
+
+  it('pull saves into the real design-system draft (integration with Epic 4)', async () => {
+    const { editor, projectId, snap } = await setup();
+    const res = await pullVariables(
+      db,
+      editor,
+      projectId,
+      req({
+        snapshot: snap,
+        selected: ['base:color.primary'],
+        resolutions: { 'base:color.primary': 'theirs' },
+      }),
+      { writeDraft: designSystemDraftWriter },
+    );
+    expect(res.applied).toBe(true);
+    const [proj] = await db.select().from(projects).where(eq(projects.id, projectId));
+    const ds = await getDesignSystem(db, editor, proj!.designSystemId);
+    expect(ds.draft.tokens['color.primary']!.value).toBe('#ff0000');
   });
 
   it('push: plans variables for the selection, then records the new base so re-diffs are clean', async () => {

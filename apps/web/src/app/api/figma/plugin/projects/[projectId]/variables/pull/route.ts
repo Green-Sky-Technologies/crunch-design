@@ -6,10 +6,12 @@
  */
 import { pluginBody, pluginPreflight, pluginRoute } from '@/server/services/figma/plugin-http';
 import { SYNC_MAX_BYTES, syncRequest } from '@/server/services/figma/schemas';
+import { designSystemDraftWriter } from '@/server/services/figma/ds-draft-writer';
 import { pullVariables } from '@/server/services/figma/token-sync';
 
 export const OPTIONS = pluginPreflight;
 export const POST = pluginRoute<{ projectId: string }>(async ({ req, actor, db, params }) =>
-  // INTEGRATION: pass { writeDraft } from the design-system service to save the draft.
-  pullVariables(db, actor, params.projectId, await pluginBody(req, syncRequest, SYNC_MAX_BYTES)),
+  pullVariables(db, actor, params.projectId, await pluginBody(req, syncRequest, SYNC_MAX_BYTES), {
+    writeDraft: designSystemDraftWriter,
+  }),
 );
