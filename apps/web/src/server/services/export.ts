@@ -1,14 +1,19 @@
 /**
- * Deterministic exports (Epic 7, no LLM): standalone HTML and ZIP (7.1).
+ * Deterministic exports (Epic 7, no LLM): standalone HTML and ZIP (7.1) and the handoff
+ * bundle (7.2: handoff.json, or a ZIP with handoff.json + schema + reference HTML).
  * Needs export:deterministic, which Viewers have (SPEC §3, D17). Reads are workspace-scoped.
  */
 import { assertCan } from '@crunch/authz';
-import type { Db } from '@crunch/db';
+import { agentConversations, and, desc, eq, type Db } from '@crunch/db';
 import type { DesignDoc } from '@crunch/doc-model';
+import type { HandoffBundle } from '@crunch/contracts';
 import {
   buildExportZip,
+  buildHandoffBundle,
   ExportError,
   exportHtml,
+  HANDOFF_README,
+  handoffJsonSchema,
   slugify,
   type AssetFetcher,
 } from '@crunch/handoff';
@@ -17,10 +22,10 @@ import { recordActivity } from './activity';
 import { getDoc } from './design-docs';
 import { resolveProjectDesignSystem, type ResolvedDesignSystem } from './project-design-system';
 import { getProject } from './projects';
-import { getSnapshotDoc } from './snapshots';
+import { getSnapshotDoc, listSnapshots } from './snapshots';
 import { ValidationError, type Actor } from './types';
 
-export const EXPORT_FORMATS = ['html', 'zip'] as const;
+export const EXPORT_FORMATS = ['html', 'zip', 'handoff', 'handoff-zip'] as const;
 export type ExportFormat = (typeof EXPORT_FORMATS)[number];
 
 const exportInput = z
@@ -104,6 +109,47 @@ export function blobAssetFetcher(fetchImpl: typeof fetch = fetch): AssetFetcher 
   };
 }
 
+/** Build the handoff bundle (Story 7.2) for the live doc or a saved version. */
+export async function buildProjectHandoff(
+  db: Db,
+  actor: Actor,
+  projectId: string,
+  opts: { frameIds?: string[]; versionId?: string; source?: ExportSource } = {},
+): Promise<HandoffBundle> {
+  const src = opts.source ?? (await loadExportSource(db, actor, projectId, opts.versionId));
+  const [versions, conversations] = await Promise.all([
+    listSnapshots(db, actor, src.project.id, { kind: 'named', limit: 50 }),
+    db
+      .select({ title: agentConversations.title })
+      .from(agentConversations)
+      .where(
+        and(
+          eq(agentConversations.projectId, src.project.id),
+          eq(agentConversations.workspaceId, actor.workspace.id),
+        ),
+      )
+      .orderBy(desc(agentConversations.updatedAt))
+      .limit(50),
+  ]);
+  try {
+    return buildHandoffBundle({
+      project: src.project,
+      doc: src.doc,
+      designSystem: { spec: src.designSystem.spec, version: src.designSystem.version },
+      frameIds: opts.frameIds,
+      intent: {
+        projectName: src.project.name,
+        projectDescription: src.project.description,
+        versions: versions.map((v) => ({ name: v.name, description: v.description })),
+        conversationTitles: conversations.map((c) => c.title),
+      },
+    });
+  } catch (e) {
+    if (e instanceof ExportError) throw new ValidationError(e.message);
+    throw e;
+  }
+}
+
 function parseInput(input: unknown) {
   const r = exportInput.safeParse(input);
   if (!r.success) throw new ValidationError(r.error.issues[0]?.message ?? 'Invalid export request');
@@ -132,14 +178,36 @@ export async function exportDesign(
         body: r.html,
         warnings: r.warnings,
       };
+    } else if (req.format === 'handoff') {
+      const bundle = await buildProjectHandoff(db, actor, projectId, {
+        frameIds: req.frameIds,
+        source: src,
+      });
+      file = {
+        filename: `${base}.handoff.json`,
+        contentType: 'application/json; charset=utf-8',
+        body: `${JSON.stringify(bundle, null, 2)}\n`,
+        warnings: [],
+      };
     } else {
+      const extraFiles: Record<string, string> = {};
+      if (req.format === 'handoff-zip') {
+        const bundle = await buildProjectHandoff(db, actor, projectId, {
+          frameIds: req.frameIds,
+          source: src,
+        });
+        extraFiles['handoff.json'] = `${JSON.stringify(bundle, null, 2)}\n`;
+        extraFiles['handoff.schema.json'] = `${JSON.stringify(handoffJsonSchema(), null, 2)}\n`;
+        extraFiles['HANDOFF.md'] = HANDOFF_README;
+      }
       const r = await buildExportZip(src.doc, src.designSystem.spec, {
         frameIds: req.frameIds,
         title,
         fetchAsset: deps.fetchAsset ?? blobAssetFetcher(),
+        extraFiles,
       });
       file = {
-        filename: `${base}.zip`,
+        filename: req.format === 'handoff-zip' ? `${base}-handoff.zip` : `${base}.zip`,
         contentType: 'application/zip',
         body: r.zip,
         warnings: r.warnings,

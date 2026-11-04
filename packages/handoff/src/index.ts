@@ -5,3 +5,4 @@
 export * from './html';
 export * from './assets';
 export * from './zip';
+export * from './bundle';

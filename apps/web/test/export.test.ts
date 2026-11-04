@@ -1,9 +1,15 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { activity, eq } from '@crunch/db';
+import { HANDOFF_SCHEMA_VERSION, handoffBundle } from '@crunch/contracts';
+import { activity, agentConversations, eq, projects } from '@crunch/db';
 import { newId, replaceDocOps, sampleLandingDoc, type DocOp } from '@crunch/doc-model';
 import { readZipEntries } from '@crunch/handoff';
 import { commitTransaction, getDoc } from '@/server/services/design-docs';
-import { blobAssetFetcher, exportDesign, isBundlableAssetUrl } from '@/server/services/export';
+import {
+  blobAssetFetcher,
+  buildProjectHandoff,
+  exportDesign,
+  isBundlableAssetUrl,
+} from '@/server/services/export';
 import { createProject } from '@/server/services/projects';
 import { NotFoundError, ValidationError, type Actor } from '@/server/services/types';
 import { createNamedVersion } from '@/server/services/versions';
@@ -92,6 +98,74 @@ describe('HTML / ZIP export', () => {
     const { project } = await setup();
     const outsider = await makeActor(db, 'admin');
     await expect(exportDesign(db, outsider, project.id, { format: 'html' })).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
+  });
+});
+
+describe('handoff bundle export', () => {
+  it('produces a contract-valid bundle with intent from versions and conversations', async () => {
+    const { editor, viewer, project } = await setup();
+    await db
+      .update(projects)
+      .set({ description: 'Marketing site' })
+      .where(eq(projects.id, project.id));
+    await createNamedVersion(db, editor, project.id, {
+      name: 'Review',
+      description: 'Hero approved',
+    });
+    await db.insert(agentConversations).values({
+      workspaceId: editor.workspace.id,
+      projectId: project.id,
+      title: 'Make the hero bolder',
+      createdBy: editor.userId,
+    });
+    const bundle = await buildProjectHandoff(db, viewer, project.id);
+    expect(handoffBundle.safeParse(bundle).success).toBe(true);
+    expect(bundle.schemaVersion).toBe(HANDOFF_SCHEMA_VERSION);
+    expect(bundle.project).toEqual({
+      id: project.id,
+      name: 'My Landing Page',
+      description: 'Marketing site',
+    });
+    expect(bundle.intent.summary).toContain('Marketing site');
+    expect(bundle.intent.notes).toEqual([
+      'Version “Review”: Hero approved',
+      'Agent conversation: Make the hero bolder',
+    ]);
+  });
+
+  it('downloads handoff.json and a handoff ZIP (viewers allowed)', async () => {
+    const { viewer, project } = await setup();
+    const json = await exportDesign(db, viewer, project.id, { format: 'handoff' });
+    expect(json.filename).toBe('my-landing-page.handoff.json');
+    expect(handoffBundle.safeParse(JSON.parse(json.body as string)).success).toBe(true);
+
+    const zip = await exportDesign(
+      db,
+      viewer,
+      project.id,
+      { format: 'handoff-zip' },
+      { fetchAsset: noFetch },
+    );
+    expect(zip.filename).toBe('my-landing-page-handoff.zip');
+    const entries = await readZipEntries(zip.body as Uint8Array);
+    expect([...entries.keys()]).toEqual([
+      'HANDOFF.md',
+      'README.txt',
+      'frames/landing-desktop.html',
+      'handoff.json',
+      'handoff.schema.json',
+      'index.html',
+    ]);
+    const parsed = JSON.parse(new TextDecoder().decode(entries.get('handoff.json')));
+    expect(handoffBundle.safeParse(parsed).success).toBe(true);
+  });
+
+  it('is workspace-scoped', async () => {
+    const { project } = await setup();
+    const outsider = await makeActor(db, 'admin');
+    await expect(buildProjectHandoff(db, outsider, project.id)).rejects.toBeInstanceOf(
       NotFoundError,
     );
   });

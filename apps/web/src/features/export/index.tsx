@@ -16,6 +16,12 @@ export interface ExportItem {
 export const EXPORT_ITEMS: ExportItem[] = [
   { format: 'html', label: 'HTML page', hint: 'One standalone .html file' },
   { format: 'zip', label: 'ZIP (HTML + assets)', hint: 'Opens offline; one page per frame' },
+  {
+    format: 'handoff-zip',
+    label: 'Handoff bundle (ZIP)',
+    hint: 'handoff.json + schema + reference HTML for a coding agent',
+  },
+  { format: 'handoff', label: 'Handoff JSON', hint: 'Just handoff.json' },
 ];
 
 export function exportUrl(
