@@ -162,11 +162,16 @@ export function startTextEdit(
 
   target.focus({ preventScroll: true });
   try {
-    const range = document.createRange();
-    range.selectNodeContents(target);
+    // setBaseAndExtent, not addRange: WebKit ignores ranges added inside a shadow root, which
+    // leaves no caret and drops typing.
     const sel = window.getSelection();
-    sel?.removeAllRanges();
-    sel?.addRange(range);
+    if (sel?.setBaseAndExtent) sel.setBaseAndExtent(target, 0, target, target.childNodes.length);
+    else {
+      const range = document.createRange();
+      range.selectNodeContents(target);
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+    }
   } catch {
     // Selection inside shadow roots is best-effort in some engines; focus still works.
   }
