@@ -13,6 +13,7 @@ export function CanvasToolbar() {
   const readOnly = useDocStore((s) => s.readOnly);
   const isEmpty = useDocStore((s) => Object.keys(s.doc.nodes).length <= s.doc.frames.length);
   const zoom = useCanvas((s) => s.camera.z);
+  const layersOpen = useCanvas((s) => s.layersOpen);
   const docStore = useDocStoreApi();
   const canvas = useCanvasStoreApi();
   const [menu, setMenu] = useState(false);
@@ -56,6 +57,14 @@ export function CanvasToolbar() {
         }}
         onPointerDown={(e) => e.stopPropagation()}
       >
+        <button
+          type="button"
+          className={`rounded px-2 py-1 hover:bg-surface-2 ${layersOpen ? 'text-accent' : ''}`}
+          aria-pressed={layersOpen}
+          onClick={() => canvas.getState().toggleLayers()}
+        >
+          Layers
+        </button>
         {editable && (
           <div style={{ position: 'relative' }}>
             <button

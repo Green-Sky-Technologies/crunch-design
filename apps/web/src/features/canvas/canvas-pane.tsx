@@ -11,7 +11,12 @@ import { memo, useEffect, useLayoutEffect, useRef, type ReactNode } from 'react'
 import { useDocStore, useDocStoreApi, useEditor } from '../doc-store';
 import { fitAll } from './camera-actions';
 import { useCanvas, useCanvasStoreApi } from './canvas-store';
+import { ViewportCtx } from './context';
 import { FrameChrome } from './frame-chrome';
+import { LayersPanel } from './layers-panel';
+import { RegisteredOverlays } from './overlay-api';
+import { useSelectionInput } from './selection-input';
+import { SelectionOverlay } from './selection-overlay';
 import { isTypingEvent, startGesture } from './gesture';
 import { Minimap } from './minimap';
 import { CanvasToolbar } from './toolbar';
@@ -192,6 +197,7 @@ export function CanvasPane() {
   const viewportRef = useRef<HTMLDivElement>(null);
   useViewport(viewportRef);
   useCameraGestures(viewportRef);
+  useSelectionInput(viewportRef);
 
   useEffect(() => {
     const el = viewportRef.current!;
@@ -201,33 +207,38 @@ export function CanvasPane() {
   }, [select]);
 
   return (
-    <div
-      ref={viewportRef}
-      data-testid="canvas"
-      className="bg-surface-2"
-      tabIndex={-1}
-      style={{
-        position: 'relative',
-        height: '100%',
-        overflow: 'hidden',
-        touchAction: 'none',
-        userSelect: 'none',
-        outline: 'none',
-      }}
-    >
-      <World>
-        {doc.frames.map((f) => (
-          <FrameItem key={f.id} frame={f} doc={doc} ds={designSystem.spec} />
-        ))}
-      </World>
+    <ViewportCtx.Provider value={viewportRef}>
       <div
-        data-cd-overlay=""
-        style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}
+        ref={viewportRef}
+        data-testid="canvas"
+        className="bg-surface-2"
+        tabIndex={-1}
+        style={{
+          position: 'relative',
+          height: '100%',
+          overflow: 'hidden',
+          touchAction: 'none',
+          userSelect: 'none',
+          outline: 'none',
+        }}
       >
-        <FrameChrome />
+        <World>
+          {doc.frames.map((f) => (
+            <FrameItem key={f.id} frame={f} doc={doc} ds={designSystem.spec} />
+          ))}
+        </World>
+        <div
+          data-cd-overlay=""
+          style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}
+        >
+          <SelectionOverlay />
+          <FrameChrome />
+          <RegisteredOverlays />
+        </div>
+        <LayersPanel />
+        <CanvasToolbar />
+        <Minimap />
       </div>
-      <CanvasToolbar />
-      <Minimap />
-    </div>
+    </ViewportCtx.Provider>
   );
 }
