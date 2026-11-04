@@ -49,7 +49,7 @@ export function RevertButton({ messageId }: { messageId: string }) {
     return (
       <span className="text-xs text-muted">
         Reverted.{' '}
-        <button type="button" className="underline" onClick={undo}>
+        <button type="button" className="btn-link" onClick={undo}>
           Undo
         </button>
       </span>
@@ -57,7 +57,7 @@ export function RevertButton({ messageId }: { messageId: string }) {
   return (
     <button
       type="button"
-      className="text-xs text-muted underline"
+      className="btn-link text-xs text-muted"
       disabled={state === 'working'}
       onClick={() => void revert()}
     >

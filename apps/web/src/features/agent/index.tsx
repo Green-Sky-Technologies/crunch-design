@@ -116,7 +116,7 @@ export function AgentPane() {
         {chat.error && (
           <p className="text-xs text-danger" role="alert">
             {chat.error}{' '}
-            <button type="button" className="underline" onClick={chat.dismissError}>
+            <button type="button" className="btn-link" onClick={chat.dismissError}>
               Dismiss
             </button>
           </p>

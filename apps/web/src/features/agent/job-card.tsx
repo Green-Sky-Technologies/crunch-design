@@ -120,7 +120,7 @@ export function JobCard({
         {active && canRun && (
           <button
             type="button"
-            className="text-muted underline"
+            className="btn-link text-muted"
             onClick={() => void agentApi.cancelJob(jobId).then((j) => setStatus(j.status))}
           >
             Cancel job

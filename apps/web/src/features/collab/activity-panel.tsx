@@ -165,7 +165,7 @@ export function ActivityPanel() {
                 {e.edits &&
                   ` · v${e.edits.fromVersion}${e.edits.toVersion !== e.edits.fromVersion ? `–v${e.edits.toVersion}` : ''}`}
                 {e.targetType === 'comment_thread' && e.targetId && (
-                  <button className="ml-2 underline" onClick={() => focus(e.targetId ?? null)}>
+                  <button className="btn-link ml-2" onClick={() => focus(e.targetId ?? null)}>
                     View thread
                   </button>
                 )}

@@ -97,12 +97,12 @@ export function MessageItem({
       {canRun && (
         <div className="mt-1 flex gap-2">
           {running && !m.jobId && (
-            <button type="button" className="text-xs text-muted underline" onClick={onCancel}>
+            <button type="button" className="btn-link text-xs text-muted" onClick={onCancel}>
               Cancel
             </button>
           )}
           {(m.status === 'error' || m.status === 'cancelled') && (
-            <button type="button" className="text-xs text-muted underline" onClick={onRetry}>
+            <button type="button" className="btn-link text-xs text-muted" onClick={onRetry}>
               Retry
             </button>
           )}

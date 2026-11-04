@@ -53,7 +53,14 @@ export function pinPosition(
   const p = livePinPoint(api, t, doc);
   if (p) return p;
   if (!liveAnchor(t, doc).orphaned) return null; // live but not rendered right now
-  return t.fallback ? api.canvasToOverlay(t.fallback) : null;
+  // The element was deleted: pin to the frame it was last in, so the pin stays attached to the
+  // design (a saved canvas point goes stale as frames move or are regenerated). If that frame
+  // is gone too, the thread only shows in the comments pane.
+  const frameId = t.currentFrameId ?? t.anchor.frameId;
+  const frame = doc?.frames.find((f) => f.id === frameId);
+  if (!frame) return doc ? null : t.fallback ? api.canvasToOverlay(t.fallback) : null;
+  const r = api.getNodeRect(frame.rootNodeId, frame.id);
+  return r ? pinAnchorPoint(r) : null;
 }
 
 /**

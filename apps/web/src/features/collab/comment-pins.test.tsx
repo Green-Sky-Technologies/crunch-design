@@ -99,6 +99,18 @@ describe('comments follow nodes across frames', () => {
     expect(pinPosition(api, thread(), movedToNewFrame())).toEqual({ x: 600, y: 40 });
   });
 
+  it("pins a deleted element's thread to its frame, not a stale canvas point", () => {
+    const deleted = applyOps(base, [{ op: 'removeNode', id: NODE }]).doc;
+    const root = base.frames[0]!.rootNodeId;
+    const api = frameAwareApi({ [`${FRAME}:${root}`]: { x: 100, y: 50, width: 800, height: 600 } });
+    // The saved fallback is far away (the frame moved since); the pin follows the frame.
+    const t = thread({ fallback: { x: 5000, y: 5000 }, orphaned: true });
+    expect(pinPosition(api, t, deleted)).toEqual({ x: 900, y: 50 });
+    // Frame gone too: no canvas pin (the thread still lists in the comments pane).
+    const noFrame = applyOps(deleted, [{ op: 'removeFrame', id: FRAME }]).doc;
+    expect(pinPosition(api, t, noFrame)).toBeNull();
+  });
+
   it('uses the server view (currentFrameId) when no live doc is available', () => {
     const api = frameAwareApi({ [`f_other000001:${NODE}`]: { x: 1, y: 2, width: 3, height: 4 } });
     expect(pinPosition(api, thread({ currentFrameId: 'f_other000001' }))).toEqual({ x: 4, y: 2 });
