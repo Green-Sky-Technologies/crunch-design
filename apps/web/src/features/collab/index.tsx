@@ -2,11 +2,13 @@
 
 /**
  * Collaboration controls in the editor top bar (Epic 6): comments (6.1) with ask-agent
- * requests (5.7), named versions (6.2), share links (6.3), notifications.
+ * requests (5.7), named versions (6.2), share links (6.3), activity
+ * feed (6.4), notifications.
  * Reads everything from useEditor() / useDocStore(); no props (editor-shell slot).
  */
 import { useEffect } from 'react';
 import { useEditor } from '../doc-store';
+import { ActivityPanel } from './activity-panel';
 import { useAskAgentExtras } from './ask-agent-ui';
 import { useCommentPinsOverlay } from './comment-pins';
 import { CommentsPanel } from './comments-panel';
@@ -60,12 +62,18 @@ export function CollabControls() {
     <>
       <PanelButton id="comments">Comments{openCount ? ` (${openCount})` : ''}</PanelButton>
       <PanelButton id="versions">Versions</PanelButton>
+      <PanelButton id="activity">Activity</PanelButton>
       {can('share:manage') && <PanelButton id="share">Share</PanelButton>}
       <NotificationsBell />
       {panel === 'comments' && <CommentsDrawer />}
       {panel === 'versions' && (
         <Drawer title="Versions">
           <VersionsPanel />
+        </Drawer>
+      )}
+      {panel === 'activity' && (
+        <Drawer title="Activity">
+          <ActivityPanel />
         </Drawer>
       )}
       {panel === 'share' && (
