@@ -38,8 +38,11 @@ pnpm dev                       # http://localhost:3000
 
 ### Clerk
 
-1. Create a Clerk application, then put `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` in
-   `.env.local`. Clerk's keyless mode also works for a quick start in an interactive terminal.
+1. **Quick start, no account:** run `npx clerk@latest init --framework next --accountless` in
+   `apps/web`. It writes temporary dev keys into `.env.local` (keeping your other variables).
+   Run `clerk auth login` later to claim the app into your Clerk account.
+   Or create an app at dashboard.clerk.com and put `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and
+   `CLERK_SECRET_KEY` in `.env.local` yourself.
 2. **Enable Organizations** with membership **required** (workspaces are Clerk orgs).
 3. **Roles** (Organizations → Roles & Permissions): add custom roles `org:editor` and `org:viewer`
    next to the built-in `org:admin`, and make `org:viewer` the default role for invitations.
