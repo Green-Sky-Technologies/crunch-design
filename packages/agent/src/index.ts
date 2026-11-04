@@ -7,3 +7,7 @@ export * from './models';
 export * from './usage';
 export * from './sse';
 export * from './stable';
+export * from './context';
+export * from './tools';
+export * from './tool-defs';
+export * from './memory-host';
