@@ -20,12 +20,13 @@ import {
   toFlowOps,
   topLevelSelection,
   union,
+  widthToPin,
   type ChildBox,
   type Rect,
 } from '@crunch/canvas';
 import type { Breakpoint, DesignDoc, DesignSystemSpec, DocOp } from '@crunch/doc-model';
 import type { DocStore } from '../doc-store';
-import { editBreakpointFor, type CanvasStore } from './canvas-store';
+import { gestureBreakpoint, type CanvasStore } from './canvas-store';
 import { frameIndex } from './context';
 import { flowOf, hitFromPoint, nodeElement, worldRect, type Hit } from './dom';
 import { startGesture } from './gesture';
@@ -138,6 +139,15 @@ export function startNodeDrag(ctx: DragCtx, down: PointerEvent, hit: Hit): boole
   const draggedEls = els as HTMLElement[];
   const dragged = subtreeSet(doc0, dragIds);
   const absolute = down.altKey || dragIds.every((id) => doc0.nodes[id]!.positioning === 'absolute');
+  if (absolute && draggedEls.some(transformedAncestor)) {
+    // Screen deltas no longer map 1:1 to the parent's CSS px under a scale/rotate.
+    canvas
+      .getState()
+      .setMessage(
+        'Free placement is off inside a scaled or rotated container. Use flow, or the inspector.',
+      );
+    return false;
+  }
   let target: FlowTarget | null = null;
   let delta = { x: 0, y: 0 };
   let startBounds: Rect | null = null;
@@ -200,17 +210,14 @@ export function startNodeDrag(ctx: DragCtx, down: PointerEvent, hit: Hit): boole
         canvas.getState().setDrop(t ? { line: t.line, container: t.container } : null);
       },
       onEnd: (_e, moved) => {
-        const offsets = draggedEls.map((el) => ({
-          left: el.offsetLeft,
-          top: el.offsetTop,
-          width: el.offsetWidth,
-        }));
+        const offsets = draggedEls.map(placementBox);
         restore();
         if (!moved) return;
         const st = docStore.getState();
         if (absolute) {
           const frame = st.doc.frames.find((f) => f.id === hit.frameId);
-          const bp = editBreakpointFor(canvas, frame, ctx.ds);
+          const bp = gestureBreakpoint(frame, ctx.ds);
+          for (const id of dragIds) rememberPinnedWidth(st.doc, id);
           const ops = dragIds.flatMap((id, i) =>
             absolutePlacementOps(
               st.doc,
@@ -255,14 +262,48 @@ export function positioningOps(
 ): DocOp[] {
   const index = frameIndex(doc);
   return ids.flatMap((id) => {
-    if (to === 'flow') return toFlowOps(doc, id);
+    if (to === 'flow') {
+      const restore = pinnedWidths.get(id);
+      pinnedWidths.delete(id);
+      return toFlowOps(doc, id, restore);
+    }
     const el = nodeElement(scope, index.get(id) ?? '', id);
-    return absolutePlacementOps(
-      doc,
-      id,
-      bp,
-      { left: el?.offsetLeft ?? 0, top: el?.offsetTop ?? 0 },
-      el ? { width: el.offsetWidth } : undefined,
-    );
+    rememberPinnedWidth(doc, id);
+    const box = el ? placementBox(el) : { left: 0, top: 0, width: 0 };
+    return absolutePlacementOps(doc, id, bp, box, el ? { width: box.width } : undefined);
   });
+}
+
+/**
+ * Widths pinned when nodes were made absolute (canvas session memory), so returning to flow
+ * restores what was there instead of leaving a fixed width behind.
+ */
+const pinnedWidths = new Map<string, { previous: unknown }>();
+function rememberPinnedWidth(doc: DesignDoc, id: string) {
+  if (doc.nodes[id]?.positioning === 'absolute') return;
+  const pin = widthToPin(doc, id);
+  if (pin) pinnedWidths.set(id, pin);
+}
+
+/**
+ * Where CSS left/top must be to keep the element's box in place: offsetLeft/Top measure the
+ * border box from the offset parent's padding edge, but left/top place the margin box.
+ */
+export function placementBox(el: HTMLElement): { left: number; top: number; width: number } {
+  const cs = getComputedStyle(el);
+  return {
+    left: el.offsetLeft - (parseFloat(cs.marginLeft) || 0),
+    top: el.offsetTop - (parseFloat(cs.marginTop) || 0),
+    width: el.offsetWidth,
+  };
+}
+
+/** True if an ancestor inside the frame is scaled, rotated or transformed. */
+export function transformedAncestor(el: HTMLElement): boolean {
+  for (let p = el.parentElement; p && !p.classList.contains('cd-frame'); p = p.parentElement) {
+    const cs = getComputedStyle(p);
+    const set = (v: string | undefined) => !!v && v !== 'none';
+    if (set(cs.transform) || set(cs.scale) || set(cs.rotate)) return true;
+  }
+  return false;
 }

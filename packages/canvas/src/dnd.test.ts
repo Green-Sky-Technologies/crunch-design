@@ -8,6 +8,7 @@ import {
   moveOps,
   subtreeSet,
   toFlowOps,
+  widthToPin,
 } from './dnd';
 
 const doc = sampleLandingDoc();
@@ -107,24 +108,64 @@ describe('move ops', () => {
   });
 });
 
-describe('absolute placement', () => {
-  it('makes a node absolute at a position, pinning a fill width, and back to flow', () => {
+describe('absolute placement (breakpoint-safe)', () => {
+  it('converting at a non-base breakpoint writes base insets and width and clears overrides', () => {
+    // a node that already has lg overrides for width and an inset
+    const prepared = applyOps(doc, [
+      { op: 'setStyle', id: 'n_herobody01', breakpoint: 'lg', prop: 'width', value: 'fill' },
+      { op: 'setStyle', id: 'n_herobody01', breakpoint: 'md', prop: 'top', value: 5 },
+    ]).doc;
     const ops = absolutePlacementOps(
-      doc,
+      prepared,
       'n_herobody01',
       'lg',
       { left: 10.4, top: 20.6 },
       { width: 400 },
     );
-    const next = applyOps(doc, ops).doc;
-    const n = next.nodes['n_herobody01']!;
+    const n = applyOps(prepared, ops).doc.nodes['n_herobody01']!;
     expect(n.positioning).toBe('absolute');
-    expect(n.style.lg).toMatchObject({ left: 10, top: 21, width: 400 });
-    const flow = applyOps(next, toFlowOps(next, 'n_herobody01')).doc.nodes['n_herobody01']!;
-    expect(flow.positioning).toBe('flow');
-    expect(flow.style.lg?.left).toBeUndefined();
-    // an already-absolute node only moves
-    expect(absolutePlacementOps(next, 'n_herobody01', 'lg', { left: 1, top: 2 })).toHaveLength(2);
+    expect(n.style.base).toMatchObject({ left: 10, top: 21, width: 400 });
+    // every breakpoint resolves to a position and the pinned width
+    expect(n.style.md?.top).toBeUndefined();
+    expect(n.style.lg?.width).toBeUndefined();
+    expect(n.style.lg?.left).toBeUndefined();
+  });
+
+  it('moving an already-absolute node writes the given breakpoint', () => {
+    const abs = applyOps(
+      doc,
+      absolutePlacementOps(doc, 'n_herobody01', 'lg', { left: 1, top: 2 }),
+    ).doc;
+    const moved = applyOps(
+      abs,
+      absolutePlacementOps(abs, 'n_herobody01', 'lg', { left: 50, top: 60 }),
+    ).doc;
+    const n = moved.nodes['n_herobody01']!;
+    expect(n.style.base).toMatchObject({ left: 1, top: 2 });
+    expect(n.style.lg).toMatchObject({ left: 50, top: 60 });
     expect(absolutePlacementOps(doc, 'n_root000001', 'lg', { left: 1, top: 2 })).toEqual([]);
+  });
+
+  it('returning to flow clears insets everywhere and restores the pinned width', () => {
+    const pin = widthToPin(doc, 'n_herobody01');
+    expect(pin).toEqual({ previous: null }); // no width before
+    const abs = applyOps(
+      doc,
+      absolutePlacementOps(doc, 'n_herobody01', 'md', { left: 1, top: 2 }, { width: 300 }),
+    ).doc;
+    const moved = applyOps(
+      abs,
+      absolutePlacementOps(abs, 'n_herobody01', 'lg', { left: 9, top: 9 }),
+    ).doc;
+    const flow = applyOps(moved, toFlowOps(moved, 'n_herobody01', pin!)).doc.nodes['n_herobody01']!;
+    expect(flow.positioning).toBe('flow');
+    expect(flow.style.base?.width).toBeUndefined();
+    expect(flow.style.base?.left).toBeUndefined();
+    expect(flow.style.lg?.left).toBeUndefined();
+    // a fixed width needs no pin
+    const fixed = applyOps(doc, [
+      { op: 'setStyle', id: 'n_herobody01', breakpoint: 'base', prop: 'width', value: 200 },
+    ]).doc;
+    expect(widthToPin(fixed, 'n_herobody01')).toBeNull();
   });
 });

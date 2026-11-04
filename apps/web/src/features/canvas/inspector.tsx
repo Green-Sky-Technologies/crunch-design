@@ -28,7 +28,7 @@ import {
 import { useCallback, useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useDocStore, useDocStoreApi, useEditor } from '../doc-store';
-import { useCanvas, useCanvasStoreApi } from './canvas-store';
+import { inspectorBreakpoint, useCanvas, useCanvasStoreApi } from './canvas-store';
 import { frameIndex } from './context';
 import { nodeElement } from './dom';
 import { positioningOps } from './drag';
@@ -68,10 +68,18 @@ function useEditBreakpoint(frame: Frame | undefined): [Breakpoint, Breakpoint | 
   const { designSystem } = useEditor();
   const override = useCanvas((s) => s.editBreakpoint);
   const frameBp = frame ? frameBreakpoint(frame, designSystem.spec) : 'base';
-  return [override ?? frameBp, frame ? frameBp : null];
+  return [inspectorBreakpoint(override, frame, designSystem.spec), frame ? frameBp : null];
 }
 
-function BreakpointTabs({ bp, frameBp }: { bp: Breakpoint; frameBp: Breakpoint | null }) {
+function BreakpointTabs({
+  bp,
+  frameBp,
+  frameId,
+}: {
+  bp: Breakpoint;
+  frameBp: Breakpoint | null;
+  frameId: string | undefined;
+}) {
   const canvas = useCanvasStoreApi();
   const { designSystem } = useEditor();
   const widths = {
@@ -91,7 +99,9 @@ function BreakpointTabs({ bp, frameBp }: { bp: Breakpoint; frameBp: Breakpoint |
             aria-selected={b === bp}
             title={b === 'base' ? 'Base (all widths)' : `≥ ${widths[b]}px`}
             className={`px-2 py-0.5 ${b === bp ? 'bg-accent text-accent-ink' : 'hover:bg-surface-2'}`}
-            onClick={() => canvas.getState().setEditBreakpoint(b === frameBp ? null : b)}
+            onClick={() =>
+              frameId && canvas.getState().setEditBreakpoint(frameId, b === frameBp ? null : b)
+            }
           >
             {b}
             {b === frameBp ? ' •' : ''}
@@ -290,7 +300,7 @@ function NodeInspector({ ids, frame }: { ids: string[]; frame: Frame | undefined
   return (
     <div data-testid="inspector">
       <NodeMeta key={primary.id} nodes={nodes} readOnly={readOnly} bp={bp} />
-      <BreakpointTabs bp={bp} frameBp={frameBp} />
+      <BreakpointTabs bp={bp} frameBp={frameBp} frameId={frame?.id} />
       <SizingRow nodes={nodes} bp={bp} readOnly={readOnly} />
       <div className="px-3 pb-1">
         <input

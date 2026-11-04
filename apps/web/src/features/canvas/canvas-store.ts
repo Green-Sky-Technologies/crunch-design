@@ -36,9 +36,15 @@ export interface CanvasState {
   /** Live preview of a frame move/resize gesture (committed as one op on release). */
   framePreview: { frameId: string; dx: number; dy: number; width?: number } | null;
   setFramePreview(p: CanvasState['framePreview']): void;
-  /** Breakpoint the inspector edits; null follows the selected frame's breakpoint. */
-  editBreakpoint: Breakpoint | null;
-  setEditBreakpoint(bp: Breakpoint | null): void;
+  /**
+   * Inspector breakpoint override, scoped to the frame it was chosen in. Any other frame (and
+   * every canvas gesture) uses the breakpoint the frame renders.
+   */
+  editBreakpoint: { frameId: string; bp: Breakpoint } | null;
+  setEditBreakpoint(frameId: string, bp: Breakpoint | null): void;
+  /** Short canvas message (why an action was refused). */
+  message: string | null;
+  setMessage(m: string | null): void;
   /** Drop indicator during a flow drag, in world coordinates. */
   drop: { line: Rect; container: Rect } | null;
   /** Smart guides during resize/absolute moves, in world coordinates. */
@@ -73,7 +79,9 @@ export function createCanvasStore(): CanvasStore {
     guides: null,
     setDrop: (drop) => set({ drop }),
     setGuides: (guides) => set({ guides }),
-    setEditBreakpoint: (editBreakpoint) => set({ editBreakpoint }),
+    setEditBreakpoint: (frameId, bp) => set({ editBreakpoint: bp ? { frameId, bp } : null }),
+    message: null,
+    setMessage: (message) => set({ message }),
     setFramePreview: (framePreview) => set({ framePreview }),
     setCamera: (camera) => set({ camera }),
     setViewport: (viewport) => set({ viewport }),
@@ -94,13 +102,22 @@ export function createCanvasStore(): CanvasStore {
   }));
 }
 
-/** Breakpoint canvas edits target: the inspector override, else the frame's own breakpoint. */
-export function editBreakpointFor(
-  canvas: CanvasStore,
+/** Inspector breakpoint: the override if it was chosen in this frame, else the frame's own. */
+export function inspectorBreakpoint(
+  override: CanvasState['editBreakpoint'],
   frame: Frame | undefined,
   ds: DesignSystemSpec,
 ): Breakpoint {
-  return canvas.getState().editBreakpoint ?? (frame ? frameBreakpoint(frame, ds) : 'base');
+  if (frame && override?.frameId === frame.id) return override.bp;
+  return frame ? frameBreakpoint(frame, ds) : 'base';
+}
+
+/**
+ * Breakpoint canvas gestures (drag, resize, hug) write: always the one the frame renders, so a
+ * gesture's result is what you see. The inspector override never applies to gestures.
+ */
+export function gestureBreakpoint(frame: Frame | undefined, ds: DesignSystemSpec): Breakpoint {
+  return frame ? frameBreakpoint(frame, ds) : 'base';
 }
 
 const stores = new WeakMap<DocStore, CanvasStore>();

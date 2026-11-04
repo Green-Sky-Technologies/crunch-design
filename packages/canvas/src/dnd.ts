@@ -132,10 +132,25 @@ export function moveOps(
   return ops;
 }
 
+const INSETS = ['top', 'right', 'bottom', 'left'] as const;
+
+/** The width a flow node needs pinned when it leaves the flow, or null if its width holds. */
+export function widthToPin(doc: DesignDoc, id: string): { previous: unknown } | null {
+  const n = doc.nodes[id];
+  if (!n) return null;
+  const w = n.style.base?.width;
+  const atBps = [n.style.md?.width, n.style.lg?.width].filter((x) => x !== undefined);
+  const unsized = (v: unknown) => v === undefined || v === 'fill' || v === 'auto';
+  return unsized(w) || atBps.some(unsized) ? { previous: w ?? null } : null;
+}
+
 /**
- * Ops for free placement at `left`/`top` (px, relative to the nearest positioned ancestor) at a
- * breakpoint. Turns a flow node absolute, pinning its width so it keeps its size when it leaves
- * the flow.
+ * Ops for free placement at `left`/`top` (px, relative to the nearest positioned ancestor).
+ *
+ * Positioning is node-level, so turning a flow node absolute is breakpoint-safe: insets (and a
+ * pinned width, so it keeps its size outside the flow) are written at **base**, and inset
+ * overrides at md/lg are cleared, so every breakpoint has a position. Moving a node that's already
+ * absolute writes its insets at the given breakpoint (responsive placement over the base).
  */
 export function absolutePlacementOps(
   doc: DesignDoc,
@@ -147,32 +162,54 @@ export function absolutePlacementOps(
   const n = doc.nodes[id];
   if (!n?.parentId) return [];
   const ops: DocOp[] = [];
+  const at = n.positioning === 'absolute' ? bp : 'base';
   if (n.positioning !== 'absolute') {
     ops.push({ op: 'setNodeMeta', id, patch: { positioning: 'absolute' } });
-    const w = n.style[bp]?.width ?? n.style.base?.width;
-    if (size && (w === undefined || w === 'fill' || w === 'auto')) {
+    if (size && widthToPin(doc, id)) {
       ops.push({
         op: 'setStyle',
         id,
-        breakpoint: bp,
+        breakpoint: 'base',
         prop: 'width',
         value: Math.round(size.width),
       });
+      for (const b of ['md', 'lg'] as const)
+        if (n.style[b]?.width !== undefined)
+          ops.push({ op: 'setStyle', id, breakpoint: b, prop: 'width', value: null });
     }
+    for (const b of ['md', 'lg'] as const)
+      for (const prop of INSETS)
+        if (n.style[b]?.[prop] !== undefined)
+          ops.push({ op: 'setStyle', id, breakpoint: b, prop, value: null });
   }
-  ops.push({ op: 'setStyle', id, breakpoint: bp, prop: 'left', value: Math.round(pos.left) });
-  ops.push({ op: 'setStyle', id, breakpoint: bp, prop: 'top', value: Math.round(pos.top) });
+  ops.push({ op: 'setStyle', id, breakpoint: at, prop: 'left', value: Math.round(pos.left) });
+  ops.push({ op: 'setStyle', id, breakpoint: at, prop: 'top', value: Math.round(pos.top) });
   return ops;
 }
 
-/** Ops that return an absolute node to the flow, clearing its insets at every breakpoint. */
-export function toFlowOps(doc: DesignDoc, id: string): DocOp[] {
+/**
+ * Ops that return an absolute node to the flow, clearing its insets at every breakpoint. Pass the
+ * width recorded when it was made absolute (`widthToPin().previous`) to undo the pinned width.
+ */
+export function toFlowOps(
+  doc: DesignDoc,
+  id: string,
+  restoreWidth?: { previous: unknown },
+): DocOp[] {
   const n = doc.nodes[id];
   if (!n || n.positioning === 'flow') return [];
   const ops: DocOp[] = [{ op: 'setNodeMeta', id, patch: { positioning: 'flow' } }];
   for (const bp of ['base', 'md', 'lg'] as const)
-    for (const prop of ['top', 'right', 'bottom', 'left'] as const)
+    for (const prop of INSETS)
       if (n.style[bp]?.[prop] !== undefined)
         ops.push({ op: 'setStyle', id, breakpoint: bp, prop, value: null });
+  if (restoreWidth)
+    ops.push({
+      op: 'setStyle',
+      id,
+      breakpoint: 'base',
+      prop: 'width',
+      value: restoreWidth.previous ?? null,
+    });
   return ops;
 }

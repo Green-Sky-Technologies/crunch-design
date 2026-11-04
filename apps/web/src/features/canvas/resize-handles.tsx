@@ -16,7 +16,7 @@ import {
 } from '@crunch/canvas';
 import type { DocOp } from '@crunch/doc-model';
 import { useDocStore, useDocStoreApi, useEditor } from '../doc-store';
-import { editBreakpointFor, useCanvas, useCanvasStoreApi } from './canvas-store';
+import { gestureBreakpoint, useCanvas, useCanvasStoreApi } from './canvas-store';
 import { frameIndex, useViewportRef } from './context';
 import { nodeElement, worldRect } from './dom';
 import { startGesture } from './gesture';
@@ -126,7 +126,7 @@ export function ResizeHandles() {
         clear();
         if (!moved) return;
         const st = docStore.getState();
-        const bp = editBreakpointFor(canvas, frame, designSystem.spec);
+        const bp = gestureBreakpoint(frame, designSystem.spec);
         const ops: DocOp[] = [];
         const set = (prop: string, value: number) =>
           ops.push({ op: 'setStyle', id: node.id, breakpoint: bp, prop, value });
@@ -163,7 +163,7 @@ export function ResizeHandles() {
   };
 
   const hug = (h: Handle) => () => {
-    const bp = editBreakpointFor(canvas, frame, designSystem.spec);
+    const bp = gestureBreakpoint(frame, designSystem.spec);
     const ops: DocOp[] = [];
     if (h.includes('e') || h.includes('w'))
       ops.push({ op: 'setStyle', id: node.id, breakpoint: bp, prop: 'width', value: 'hug' });

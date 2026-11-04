@@ -28,6 +28,7 @@ import { useSelectionInput } from './selection-input';
 import { DropIndicator, SelectionOverlay } from './selection-overlay';
 import { isTypingEvent, startGesture } from './gesture';
 import { Minimap } from './minimap';
+import { CanvasMessage } from './canvas-message';
 import { CanvasToolbar } from './toolbar';
 
 /**
@@ -233,15 +234,20 @@ function useViewport(ref: React.RefObject<HTMLDivElement | null>) {
   const docStore = useDocStoreApi();
   useLayoutEffect(() => {
     const el = ref.current!;
+    let scheduled = false;
     const measure = () => {
       const r = el.getBoundingClientRect();
       canvas.getState().setViewport({ width: r.width, height: r.height });
       const st = canvas.getState();
-      if (!st.fitted && r.width > 0 && docStore.getState().doc.frames.length) {
-        st.setFitted();
+      if (!st.fitted && !scheduled && r.width > 0 && docStore.getState().doc.frames.length) {
+        scheduled = true;
         // Frames portal into their shadow roots after mount; fit once they've been measured.
+        // `fitted` flips only after the camera has moved, so "fitted" means positions are final.
         requestAnimationFrame(() =>
-          requestAnimationFrame(() => fitAll(canvas, docStore.getState().doc)),
+          requestAnimationFrame(() => {
+            fitAll(canvas, docStore.getState().doc);
+            canvas.getState().setFitted();
+          }),
         );
       }
     };
@@ -328,6 +334,7 @@ const UI = {
   LayersPanel: memo(LayersPanel),
   CanvasToolbar: memo(CanvasToolbar),
   Minimap: memo(Minimap),
+  CanvasMessage: memo(CanvasMessage),
 };
 
 export function CanvasPane() {
@@ -390,6 +397,7 @@ export function CanvasPane() {
         <UI.LayersPanel />
         <UI.CanvasToolbar />
         <UI.Minimap />
+        <UI.CanvasMessage />
       </div>
     </ViewportCtx.Provider>
   );
