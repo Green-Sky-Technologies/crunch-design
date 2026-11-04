@@ -9,7 +9,9 @@
     "lint": "eslint",
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run --passWithNoTests",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "e2e:canvas": "playwright test -c e2e/canvas/playwright.config.ts",
+    "e2e:export": "playwright test -c e2e/export/playwright.config.ts"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.9.24",
