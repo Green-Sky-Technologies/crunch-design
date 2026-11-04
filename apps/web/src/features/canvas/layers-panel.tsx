@@ -5,7 +5,7 @@
  * (Shift toggles), hovering highlights on the canvas, the caret expands, the eye hides.
  * Ancestors of the selection expand automatically.
  */
-import { ancestors, layerRows, toggleSelection, type LayerRow } from '@crunch/canvas';
+import { ancestors, isLocked, layerRows, toggleSelection, type LayerRow } from '@crunch/canvas';
 import { memo, useCallback, useState } from 'react';
 import { useDocStore, useDocStoreApi } from '../doc-store';
 import { useCanvas, useCanvasStoreApi } from './canvas-store';
@@ -107,6 +107,7 @@ export function LayersPanel() {
                     selected={selection.nodeIds.includes(r.id)}
                     hovered={hoverId === r.id}
                     readOnly={readOnly}
+                    lockedTree={isLocked(doc, r.id)}
                     onToggle={toggle}
                   />
                 ))}
@@ -125,6 +126,8 @@ interface LayerItemProps {
   selected: boolean;
   hovered: boolean;
   readOnly: boolean;
+  /** The row or an ancestor is locked: no visibility toggle. */
+  lockedTree: boolean;
   onToggle(id: string): void;
 }
 
@@ -140,7 +143,15 @@ const sameRow = (a: LayerRow, b: LayerRow) =>
 
 /** One layer row. Memoized on its row facts, so a doc edit only re-renders the rows it changes. */
 const LayerItem = memo(
-  function LayerItem({ row: r, frameId, selected, hovered, readOnly, onToggle }: LayerItemProps) {
+  function LayerItem({
+    row: r,
+    frameId,
+    selected,
+    hovered,
+    readOnly,
+    lockedTree,
+    onToggle,
+  }: LayerItemProps) {
     const docStore = useDocStoreApi();
     const canvas = useCanvasStoreApi();
     return (
@@ -187,7 +198,7 @@ const LayerItem = memo(
           {r.label}
           {r.locked ? ' 🔒' : ''}
         </button>
-        {!readOnly && r.depth > 0 && (
+        {!readOnly && !lockedTree && r.depth > 0 && (
           <button
             type="button"
             aria-label={r.hidden ? `Show ${r.label}` : `Hide ${r.label}`}
@@ -213,5 +224,6 @@ const LayerItem = memo(
     a.selected === b.selected &&
     a.hovered === b.hovered &&
     a.readOnly === b.readOnly &&
+    a.lockedTree === b.lockedTree &&
     a.onToggle === b.onToggle,
 );

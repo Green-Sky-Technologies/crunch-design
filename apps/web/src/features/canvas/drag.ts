@@ -13,6 +13,7 @@ import {
   dropIndex,
   dropLine,
   isContainer,
+  isLocked,
   moveOps,
   selectableAt,
   snapMoveRect,
@@ -92,7 +93,8 @@ export function flowTargetAt(
         : x - r.left < EDGE || r.right - x < EDGE;
     if (near) parentId = hn.parentId;
   }
-  if (!canDropInto(doc, dragIds, parentId)) return null;
+  // Nothing can be dropped into a locked container (that would edit it).
+  if (!canDropInto(doc, dragIds, parentId) || isLocked(doc, parentId)) return null;
   const cel = nodeElement(ctx.viewport, hit.frameId, parentId);
   if (!cel) return null;
   const flow = flowOf(cel);
@@ -126,6 +128,10 @@ export function startNodeDrag(ctx: DragCtx, down: PointerEvent, hit: Hit): boole
   const { docStore, canvas } = ctx;
   const s = docStore.getState();
   if (s.readOnly) return false;
+  if (s.selection.nodeIds.some((id) => isLocked(s.doc, id))) {
+    ctx.canvas.getState().setMessage('Locked layers can’t be moved. Unlock them in the inspector.');
+    return false;
+  }
   const doc0 = s.doc;
   const dragIds = topLevelSelection(doc0, s.selection.nodeIds);
   if (

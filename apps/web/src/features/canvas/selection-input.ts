@@ -7,6 +7,7 @@
  */
 import {
   firstChild,
+  isLocked,
   parentOf,
   selectableAt,
   sibling,
@@ -60,7 +61,7 @@ export function handleTreeKey(store: DocStore, e: KeyboardEvent): boolean {
     }
     case 'Delete':
     case 'Backspace': {
-      const removable = topLevelSelection(doc, ids);
+      const removable = topLevelSelection(doc, ids).filter((id) => !isLocked(doc, id));
       if (!removable.length || s.readOnly) return false;
       const parent = parentOf(doc, removable[0]!);
       const ok = s.apply(

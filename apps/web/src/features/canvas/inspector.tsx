@@ -11,6 +11,7 @@ import {
   nodeLabel,
   propState,
   sharedValue,
+  isLocked,
   sizingMode,
   type SizingMode,
   tokensForProp,
@@ -112,7 +113,19 @@ function BreakpointTabs({
   );
 }
 
-function NodeMeta({ nodes, readOnly, bp }: { nodes: Node[]; readOnly: boolean; bp: Breakpoint }) {
+function NodeMeta({
+  nodes,
+  readOnly,
+  docReadOnly,
+  bp,
+}: {
+  nodes: Node[];
+  /** Edits blocked (role, lock, or a locked layer in the selection). */
+  readOnly: boolean;
+  /** Only the document is read-only (unlocking a layer is still allowed). */
+  docReadOnly: boolean;
+  bp: Breakpoint;
+}) {
   const docStore = useDocStoreApi();
   const n = nodes[0]!;
   const [draft, setDraft] = useState<string | null>(null);
@@ -157,20 +170,16 @@ function NodeMeta({ nodes, readOnly, bp }: { nodes: Node[]; readOnly: boolean; b
               key={p}
               type="button"
               role="radio"
-              aria-checked={n.positioning === p}
-              disabled={readOnly || !n.parentId}
-              className={`px-2 py-0.5 ${n.positioning === p ? 'bg-surface-2 font-medium' : ''}`}
+              aria-checked={nodes.every((x) => x.positioning === p)}
+              disabled={readOnly || nodes.some((x) => !x.parentId)}
+              className={`px-2 py-0.5 ${nodes.every((x) => x.positioning === p) ? 'bg-surface-2 font-medium' : ''}`}
               onClick={() => {
-                if (n.positioning === p) return;
-                // Keep the node where it is: absolute gets top/left from its current layout box.
+                // Per node: only those not already `p` change (a mixed selection converges).
+                const todo = nodes.filter((x) => x.positioning !== p).map((x) => x.id);
+                if (!todo.length) return;
+                // Keep nodes where they are: absolute gets top/left from the current layout box.
                 const s = docStore.getState();
-                const ops = positioningOps(
-                  s.doc,
-                  nodes.map((x) => x.id),
-                  p,
-                  bp,
-                  document,
-                );
+                const ops = positioningOps(s.doc, todo, p, bp, document);
                 s.apply(ops, {
                   source: 'inspector',
                   label: p === 'absolute' ? 'Make absolute' : 'Return to flow',
@@ -181,6 +190,21 @@ function NodeMeta({ nodes, readOnly, bp }: { nodes: Node[]; readOnly: boolean; b
             </button>
           ))}
         </div>
+        <label className="flex items-center gap-1" title="Locked layers can't be edited">
+          <input
+            type="checkbox"
+            aria-label="Locked"
+            disabled={docReadOnly || !n.parentId}
+            checked={nodes.every((x) => !!x.locked)}
+            onChange={(e) =>
+              meta(
+                { locked: e.target.checked ? true : null },
+                e.target.checked ? 'Lock layer' : 'Unlock layer',
+              )
+            }
+          />
+          Locked
+        </label>
         <label className="flex items-center gap-1">
           <input
             type="checkbox"
@@ -294,14 +318,28 @@ function NodeInspector({ ids, frame }: { ids: string[]; frame: Frame | undefined
 
   if (!nodes.length) return null;
   const primary = nodes[0]!;
+  const doc = docStore.getState().doc;
+  const locked = nodes.some((n) => isLocked(doc, n.id));
+  const editBlocked = readOnly || locked;
   const styles = nodes.map((n) => n.style);
   const q = filter.trim().toLowerCase();
 
   return (
     <div data-testid="inspector">
-      <NodeMeta key={primary.id} nodes={nodes} readOnly={readOnly} bp={bp} />
+      {locked && (
+        <p className="mx-3 mb-2 rounded bg-surface-2 px-2 py-1 text-xs text-muted">
+          Locked layers can&apos;t be edited. Unlock to make changes.
+        </p>
+      )}
+      <NodeMeta
+        key={primary.id}
+        nodes={nodes}
+        readOnly={editBlocked}
+        docReadOnly={readOnly}
+        bp={bp}
+      />
       <BreakpointTabs bp={bp} frameBp={frameBp} frameId={frame?.id} />
-      <SizingRow nodes={nodes} bp={bp} readOnly={readOnly} />
+      <SizingRow nodes={nodes} bp={bp} readOnly={editBlocked} />
       <div className="px-3 pb-1">
         <input
           aria-label="Filter properties"
@@ -341,8 +379,10 @@ function NodeInspector({ ids, frame }: { ids: string[]; frame: Frame | undefined
                 bp={bp}
                 state={propState(primary.style, p, bp)}
                 mixed={nodes.length > 1 && sharedValue(styles, p, bp) === 'mixed'}
+                anySetHere={styles.some((st) => propState(st, p, bp).setHere)}
+                allSetHere={styles.every((st) => propState(st, p, bp).setHere)}
                 tokens={tokens.get(p)!}
-                readOnly={readOnly}
+                readOnly={editBlocked}
                 onApply={onApply}
               />
             ))}

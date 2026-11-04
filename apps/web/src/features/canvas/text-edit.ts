@@ -8,7 +8,8 @@
  * Enter or blur commits one op; Shift+Enter inserts a line break; Esc cancels.
  * Text inside a component instance edits the instance prop bound to that part.
  */
-import type { DesignSystemSpec, DocOp, Node as DocNode } from '@crunch/doc-model';
+import { isLocked } from '@crunch/canvas';
+import type { DesignDoc, DesignSystemSpec, DocOp, Node as DocNode } from '@crunch/doc-model';
 import type { DocStore } from '../doc-store';
 import type { CanvasStore } from './canvas-store';
 import { frameHost, nodeElement } from './dom';
@@ -30,7 +31,7 @@ export function textTargetFor(
   partId?: string,
 ): TextTarget | null {
   const n = doc.nodes[nodeId];
-  if (!n || n.locked) return null;
+  if (!n || isLocked(doc as DesignDoc, nodeId)) return null;
   if (n.type === 'text') return { frameId, nodeId };
   if (n.type === 'instance' && partId) {
     const part = ds.components[n.componentRef.componentId]?.nodes[partId];

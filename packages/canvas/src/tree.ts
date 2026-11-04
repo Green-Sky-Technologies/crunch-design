@@ -22,6 +22,21 @@ export function selectableAt(doc: DesignDoc, id: string): string | null {
   return null;
 }
 
+/**
+ * A node is locked if it or any ancestor is. Locked nodes can be selected (to inspect or unlock)
+ * but never edited: no delete, move, resize, text, style or visibility changes, and nothing can
+ * be dropped into them.
+ */
+export function isLocked(doc: DesignDoc, id: string): boolean {
+  let n = doc.nodes[id];
+  for (let guard = 0; n && guard < 10_000; guard++) {
+    if (n.locked) return true;
+    if (!n.parentId) return false;
+    n = doc.nodes[n.parentId];
+  }
+  return false;
+}
+
 /** Esc: the parent of a node, or null at a frame root (the frame itself becomes selected). */
 export const parentOf = (doc: DesignDoc, id: string): string | null =>
   doc.nodes[id]?.parentId ?? null;

@@ -9,6 +9,7 @@
 import {
   ALL_HANDLES,
   FLOW_HANDLES,
+  isLocked,
   resizeRect,
   snapResizeRect,
   worldRectToScreen,
@@ -61,6 +62,7 @@ export function ResizeHandles() {
   const node = id ? doc.nodes[id] : undefined;
   const world = id && frameId ? rects.get(`${frameId}:${id}`) : undefined;
   if (readOnly || !node || !frameId || !world || (gesture && gesture !== 'resize')) return null;
+  if (isLocked(doc, node.id)) return null; // locked layers can be inspected, not resized
 
   const r = worldRectToScreen(camera, world);
   const handles = node.positioning === 'absolute' ? ALL_HANDLES : FLOW_HANDLES;

@@ -30,6 +30,10 @@ type FieldProps = {
   prop: StylePropName;
   state: PropState;
   mixed: boolean;
+  /** Some selected node sets this prop at the breakpoint (reset applies). */
+  anySetHere?: boolean;
+  /** Every selected node sets it here (so "same value" really is a no-op). */
+  allSetHere?: boolean;
   bp: Breakpoint;
   tokens: TokenOption[];
   readOnly: boolean;
@@ -45,6 +49,8 @@ function sameField(a: FieldProps, b: FieldProps): boolean {
     a.prop === b.prop &&
     a.bp === b.bp &&
     a.mixed === b.mixed &&
+    a.anySetHere === b.anySetHere &&
+    a.allSetHere === b.allSetHere &&
     a.readOnly === b.readOnly &&
     a.tokens === b.tokens &&
     a.onApply === b.onApply &&
@@ -61,19 +67,13 @@ export const StyleField = memo(function StyleField({
   prop,
   state,
   mixed,
+  anySetHere = state.setHere,
+  allSetHere = state.setHere,
   bp,
   tokens,
   readOnly,
   onApply,
-}: {
-  prop: StylePropName;
-  state: PropState;
-  mixed: boolean;
-  bp: Breakpoint;
-  tokens: TokenOption[];
-  readOnly: boolean;
-  onApply(prop: StylePropName, value: unknown, meta?: ApplyMeta): boolean;
-}) {
+}: FieldProps) {
   const def = STYLE_PROPS[prop];
   const id = useId();
   const [draft, setDraft] = useState<string | null>(null);
@@ -92,8 +92,9 @@ export const StyleField = memo(function StyleField({
     const r = parseStyleInput(prop, raw);
     if (!r.ok) return setError(r.error);
     setError(null);
-    if (r.value === null && !state.setHere) return; // nothing to unset here
-    if (JSON.stringify(r.value) === JSON.stringify(state.value) && state.setHere) return;
+    // Compare against every selected node, not just the first (multi-selection).
+    if (r.value === null && !anySetHere) return; // nothing to unset here
+    if (!mixed && allSetHere && JSON.stringify(r.value) === JSON.stringify(state.value)) return;
     onApply(prop, r.value);
   };
 
@@ -245,7 +246,7 @@ export const StyleField = memo(function StyleField({
         className="flex items-center gap-0.5"
         style={{ minWidth: 44, justifyContent: 'flex-end' }}
       >
-        {state.setHere ? (
+        {anySetHere ? (
           <>
             <span
               className="rounded bg-accent/10 px-1 text-[10px] text-accent"

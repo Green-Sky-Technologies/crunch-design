@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ancestors,
   firstChild,
+  isLocked,
   layerRows,
   nodeLabel,
   parentOf,
@@ -35,6 +36,16 @@ describe('tree navigation', () => {
     ]).doc;
     expect(selectableAt(locked, 'n_herotitle1')).toBe('n_hero000001');
     expect(selectableAt(doc, 'n_herotitle1')).toBe('n_herotitle1');
+  });
+
+  it('treats descendants of a locked node as locked', () => {
+    const locked = applyOps(doc, [
+      { op: 'setNodeMeta', id: 'n_hero000001', patch: { locked: true } },
+    ]).doc;
+    expect(isLocked(locked, 'n_hero000001')).toBe(true);
+    expect(isLocked(locked, 'n_herotitle1')).toBe(true);
+    expect(isLocked(locked, 'n_features01')).toBe(false);
+    expect(isLocked(doc, 'n_herotitle1')).toBe(false);
   });
 
   it('toggles multi-selection and reduces it to top-level nodes', () => {
