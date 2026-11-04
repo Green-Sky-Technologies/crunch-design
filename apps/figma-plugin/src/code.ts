@@ -4,11 +4,13 @@
  * CrunchDesign API and the main thread applies them. Mapping logic lives in
  * @crunch/figma-convert as pure, tested functions.
  */
-import type { Settings, ToMain, ToUi } from './shared/messages';
+import { applyPushPlan } from './main/push';
+import type { FileInfo, Settings, ToMain, ToUi } from './shared/messages';
 
 const SETTINGS_KEY = 'crunchdesign.settings.v1';
+const FILE_ID_KEY = 'cd:file';
 
-figma.showUI(__html__, { width: 380, height: 560, themeColors: true });
+figma.showUI(__html__, { width: 380, height: 600, themeColors: true });
 
 function post(msg: ToUi) {
   figma.ui.postMessage(msg);
@@ -23,15 +25,36 @@ function isSettings(v: unknown): v is Settings {
   );
 }
 
+function uuid(): string {
+  const hex = '0123456789abcdef';
+  let s = '';
+  for (let i = 0; i < 36; i++) {
+    if (i === 8 || i === 13 || i === 18 || i === 23) s += '-';
+    else if (i === 14) s += '4';
+    else s += hex[Math.floor(Math.random() * 16)];
+  }
+  return s;
+}
+
+/**
+ * `figma.fileKey` is only exposed to private/development plugins. Otherwise we keep a stable
+ * random id in the document's plugin data, so links and token sync still key on "this file".
+ */
+function fileInfo(): FileInfo {
+  let key = figma.fileKey ?? '';
+  if (!key) {
+    key = figma.root.getPluginData(FILE_ID_KEY);
+    if (!key) {
+      key = `local:${uuid()}`;
+      figma.root.setPluginData(FILE_ID_KEY, key);
+    }
+  }
+  return { fileKey: key, fileName: figma.root.name, pageId: figma.currentPage.id };
+}
+
 async function sendSettings() {
   const stored: unknown = await figma.clientStorage.getAsync(SETTINGS_KEY);
-  post({
-    type: 'settings',
-    settings: isSettings(stored) ? stored : null,
-    // fileKey is only available to private/development plugins; we fall back to the file name.
-    fileKey: figma.fileKey ?? null,
-    fileName: figma.root.name,
-  });
+  post({ type: 'settings', settings: isSettings(stored) ? stored : null, file: fileInfo() });
 }
 
 async function handle(msg: ToMain) {
@@ -54,6 +77,15 @@ async function handle(msg: ToMain) {
     case 'resize':
       figma.ui.resize(380, Math.max(320, Math.min(900, Math.round(msg.height))));
       return;
+    case 'push': {
+      if (msg.plan?.version !== 1) throw new Error('Unsupported push plan version');
+      const out = await applyPushPlan(msg.plan, (m) => post({ type: 'progress', message: m }));
+      post({ type: 'push-done', result: { ...out, file: { ...fileInfo(), pageId: out.pageId } } });
+      figma.notify(
+        `Pushed: ${out.created} created, ${out.updated} updated, ${out.removed} removed`,
+      );
+      return;
+    }
     case 'close':
       figma.closePlugin();
       return;

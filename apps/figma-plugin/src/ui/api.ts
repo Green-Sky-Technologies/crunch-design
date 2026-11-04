@@ -1,4 +1,5 @@
 /** CrunchDesign plugin API client (runs in the UI iframe, which has network access). */
+import type { PushPlan, ReportItem } from '@crunch/figma-convert/plugin';
 import type { Settings } from '../shared/messages';
 
 export class ApiError extends Error {
@@ -69,6 +70,28 @@ export class Api {
   frames(projectId: string) {
     return this.request<{ projectId: string; version: number; frames: FrameInfo[] }>(
       `/projects/${encodeURIComponent(projectId)}/frames`,
+    );
+  }
+  pushPlan(projectId: string, body: { frameIds?: string[]; width?: number; variables?: boolean }) {
+    return this.request<PushPlan>(`/projects/${encodeURIComponent(projectId)}/push-plan`, {
+      method: 'POST',
+      body,
+    });
+  }
+  pushResult(
+    projectId: string,
+    body: {
+      fileKey: string;
+      fileName?: string;
+      pageId?: string;
+      docVersion: number;
+      nodeMap: Record<string, string>;
+      report: ReportItem[];
+    },
+  ) {
+    return this.request<{ nodeCount: number; lastSyncedAt: string }>(
+      `/projects/${encodeURIComponent(projectId)}/push-result`,
+      { method: 'POST', body },
     );
   }
 }

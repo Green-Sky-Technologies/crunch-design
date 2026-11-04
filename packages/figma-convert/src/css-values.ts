@@ -92,7 +92,7 @@ const DIRS: Record<string, number> = {
  * gradient runs along θ. Radial gradients map to a centered radial paint.
  */
 export function parseGradient(value: string): PaintSpec | null {
-  const m = /^(linear|radial)-gradient\((.*)\)$/s.exec(value.trim());
+  const m = /^(linear|radial)-gradient\(([\s\S]*)\)$/.exec(value.trim());
   if (!m) return null;
   const parts = splitTopLevel(m[2]!);
   let angle = 180;

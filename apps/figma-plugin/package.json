@@ -9,6 +9,9 @@
     "lint": "eslint src",
     "test": "vitest run --passWithNoTests"
   },
+  "dependencies": {
+    "@crunch/figma-convert": "workspace:*"
+  },
   "devDependencies": {
     "@figma/plugin-typings": "^1.142.0",
     "esbuild": "^0.28.2"

@@ -2,14 +2,19 @@
  * Plugin UI (iframe). Connect with a plugin token, then browse the workspace's projects and
  * frames. Later stories add push, import and token-sync tabs on top of the same state.
  */
-import { DEFAULT_API_BASE, type Settings, type ToMain, type ToUi } from '../shared/messages';
+import {
+  DEFAULT_API_BASE,
+  type FileInfo,
+  type Settings,
+  type ToMain,
+  type ToUi,
+} from '../shared/messages';
 import { Api, ApiError, normalizeBase, type FrameInfo, type Me, type Project } from './api';
 import { h, mount } from './dom';
 
 export interface AppState {
   settings: Settings | null;
-  fileKey: string | null;
-  fileName: string;
+  file: FileInfo | null;
   api: Api | null;
   me: Me | null;
   projects: Project[];
@@ -23,8 +28,7 @@ export interface AppState {
 
 export const state: AppState = {
   settings: null,
-  fileKey: null,
-  fileName: '',
+  file: null,
   api: null,
   me: null,
   projects: [],
@@ -57,6 +61,22 @@ const handlers: ((msg: ToUi) => void)[] = [];
 export function onMain(fn: (msg: ToUi) => void) {
   handlers.push(fn);
 }
+
+/** Send a request to the main thread and wait for a reply of `replyType` (or an error). */
+export function callMain<T extends ToUi['type']>(
+  msg: ToMain,
+  replyType: T,
+): Promise<Extract<ToUi, { type: T }>> {
+  return new Promise((resolve, reject) => {
+    pending = { replyType, resolve: resolve as (m: ToUi) => void, reject };
+    toMain(msg);
+  });
+}
+let pending: {
+  replyType: string;
+  resolve: (m: ToUi) => void;
+  reject: (e: Error) => void;
+} | null = null;
 
 export function errorText(e: unknown): string {
   if (e instanceof ApiError) {
@@ -269,18 +289,27 @@ export function render() {
 window.onmessage = (event: MessageEvent) => {
   const msg = (event.data as { pluginMessage?: ToUi } | null)?.pluginMessage;
   if (!msg) return;
-  if (msg.type === 'settings') {
-    state.fileKey = msg.fileKey;
-    state.fileName = msg.fileName;
+  if (pending && (msg.type === pending.replyType || msg.type === 'error')) {
+    const p = pending;
+    pending = null;
+    if (msg.type === 'error') p.reject(new Error(msg.message));
+    else p.resolve(msg);
+    return;
+  }
+  if (msg.type === 'error') {
+    state.error = msg.message;
+    state.busy = null;
+    render();
+  } else if (msg.type === 'settings') {
+    state.file = msg.file;
     const firstLoad = state.settings === null && msg.settings !== null && !state.me;
     state.settings = msg.settings;
     if (firstLoad && msg.settings) {
       const s = msg.settings;
       void task('Connecting…', () => connect(s));
     } else render();
-  } else if (msg.type === 'error') {
-    state.error = msg.message;
-    state.busy = null;
+  } else if (msg.type === 'progress') {
+    state.busy = msg.message;
     render();
   }
   for (const fn of handlers) fn(msg);
