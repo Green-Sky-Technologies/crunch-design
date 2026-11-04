@@ -1,12 +1,12 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { docOps, eq, users } from '@crunch/db';
+import { activity, docOps, eq, sql, users } from '@crunch/db';
 import { newId, replaceDocOps, sampleLandingDoc, type DocOp } from '@crunch/doc-model';
 import { describeEntry, type FeedItem } from '@/features/collab/activity-panel';
 import { EDIT_GROUP_WINDOW_MS, groupEdits, listActivity } from '@/server/services/activity';
 import { createThread } from '@/server/services/comments';
 import { commitTransaction, getDoc } from '@/server/services/design-docs';
 import { createProject } from '@/server/services/projects';
-import { NotFoundError, type Actor } from '@/server/services/types';
+import { NotFoundError, ValidationError, type Actor } from '@/server/services/types';
 import { createNamedVersion } from '@/server/services/versions';
 import { makeActor, reset, testDb } from './helpers';
 
@@ -84,15 +84,76 @@ describe('activity feed', () => {
     for (let i = 0; i < 4; i++) await createNamedVersion(db, editor, project.id, { name: `v${i}` });
     const p1 = await listActivity(db, editor, project.id, { limit: 3 });
     expect(p1.entries).toHaveLength(3);
-    expect(p1.nextBefore).not.toBeNull();
+    expect(p1.nextCursor).not.toBeNull();
     const p2 = await listActivity(db, editor, project.id, {
       limit: 3,
-      before: new Date(p1.nextBefore!),
+      cursor: p1.nextCursor!,
     });
     const ids = [...p1.entries, ...p2.entries].map((e) => e.id);
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids).toHaveLength(5); // 4 versions + the initial edit
-    expect(p2.nextBefore).toBeNull();
+    expect(p2.nextCursor).toBeNull();
+  });
+
+  it('never repeats or skips a grouped edit that straddles a page boundary', async () => {
+    const { editor, project } = await setup(); // 1 op (sample insert)
+    // A burst of 7 more edits by the same user (one group), interleaved with activity rows.
+    for (let i = 0; i < 7; i++) {
+      await commit(editor, project.id, setText(`t${i}`));
+      if (i % 3 === 0) await createNamedVersion(db, editor, project.id, { name: `v${i}` });
+    }
+    const totalOps = (await db.select().from(docOps).where(eq(docOps.projectId, project.id)))
+      .length;
+    expect(totalOps).toBe(8);
+    // Tiny pages and a tiny op window force the group across several pages.
+    const seen: string[] = [];
+    let ops = 0;
+    let versions = 0;
+    let cursor: string | undefined;
+    for (let pageNo = 0; pageNo < 50; pageNo++) {
+      const p = await listActivity(db, editor, project.id, { limit: 2, opFetchFactor: 1, cursor });
+      for (const e of p.entries) {
+        seen.push(e.id);
+        if (e.verb === 'doc.edited') ops += e.edits!.count;
+        if (e.verb === 'version.named') versions++;
+      }
+      if (!p.nextCursor) break;
+      cursor = p.nextCursor;
+    }
+    expect(new Set(seen).size).toBe(seen.length); // no entry twice
+    expect(ops).toBe(totalOps); // every op counted exactly once
+    expect(versions).toBe(3);
+  });
+
+  it('pages at microsecond precision (rows within the same millisecond)', async () => {
+    const { editor, project } = await setup();
+    const at = (us: string) => sql`timestamptz '2026-01-01 00:00:00.${sql.raw(us)}+00'`;
+    for (const us of ['000100', '000500', '000900'])
+      await db.insert(activity).values({
+        workspaceId: editor.workspace.id,
+        projectId: project.id,
+        actorType: 'user',
+        actorId: editor.userId,
+        verb: 'version.named',
+        data: { name: us },
+        createdAt: at(us) as unknown as Date,
+      });
+    const names: string[] = [];
+    let cursor: string | undefined;
+    for (let i = 0; i < 10; i++) {
+      const p = await listActivity(db, editor, project.id, { limit: 1, cursor, who: 'human' });
+      for (const e of p.entries) if (e.verb === 'version.named') names.push(String(e.data.name));
+      if (!p.nextCursor) break;
+      cursor = p.nextCursor;
+    }
+    expect(names).toEqual(['000900', '000500', '000100']);
+  });
+
+  it('rejects malformed cursors', async () => {
+    const { editor, project } = await setup();
+    await expect(
+      listActivity(db, editor, project.id, { cursor: 'not-a-cursor' }),
+    ).rejects.toBeInstanceOf(ValidationError);
   });
 
   it('is scoped to the workspace', async () => {
@@ -105,19 +166,25 @@ describe('activity feed', () => {
 });
 
 describe('groupEdits', () => {
-  const row = (id: number, minutesAgo: number, actorId = 'u1', actorType = 'user' as const) => ({
-    id,
-    version: id,
-    actorType,
-    actorId,
-    source: 'canvas',
-    label: null,
-    createdAt: new Date(Date.UTC(2026, 0, 1, 12) - minutesAgo * 60_000),
-  });
+  const row = (id: number, minutesAgo: number, actorId = 'u1', actorType = 'user' as const) => {
+    const createdAt = new Date(Date.UTC(2026, 0, 1, 12) - minutesAgo * 60_000);
+    return {
+      id,
+      version: id,
+      actorType,
+      actorId,
+      source: 'canvas',
+      label: null,
+      createdAt,
+      us: String(createdAt.getTime() * 1000),
+    };
+  };
 
   it('groups consecutive edits by the same actor inside the window', () => {
     const g = groupEdits([row(5, 0), row(4, 1), row(3, 2, 'u2'), row(2, 3), row(1, 3 + 6)]);
-    expect(g.map((e) => [e.actorId, e.edits!.count])).toEqual([
+    expect(g[0]!.head[1]).toBe(5);
+    expect(g[0]!.tail[1]).toBe(4); // resume after the oldest op of the group
+    expect(g.map(({ entry: e }) => [e.actorId, e.edits!.count])).toEqual([
       ['u1', 2],
       ['u2', 1],
       ['u1', 1],

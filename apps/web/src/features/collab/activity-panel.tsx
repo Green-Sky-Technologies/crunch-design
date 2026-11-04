@@ -91,18 +91,18 @@ export function ActivityPanel() {
   const [error, setError] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
 
-  const url = (before?: string) =>
-    `/api/versions/activity?projectId=${encodeURIComponent(project.id)}&who=${filter}${before ? `&before=${encodeURIComponent(before)}` : ''}`;
+  const url = (cursor?: string) =>
+    `/api/versions/activity?projectId=${encodeURIComponent(project.id)}&who=${filter}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
 
   useEffect(() => {
     let live = true;
-    request<{ entries: FeedItem[]; nextBefore: string | null }>(
+    request<{ entries: FeedItem[]; nextCursor: string | null }>(
       `/api/versions/activity?projectId=${encodeURIComponent(project.id)}&who=${filter}`,
     )
       .then((r) => {
         if (!live) return;
         setItems(r.entries);
-        setNext(r.nextBefore);
+        setNext(r.nextCursor);
       })
       .catch((e) => live && setError(e instanceof Error ? e.message : 'Failed to load'));
     return () => {
@@ -114,9 +114,9 @@ export function ActivityPanel() {
     if (!next) return;
     setLoadingMore(true);
     try {
-      const r = await request<{ entries: FeedItem[]; nextBefore: string | null }>(url(next));
+      const r = await request<{ entries: FeedItem[]; nextCursor: string | null }>(url(next));
       setItems((xs) => [...(xs ?? []), ...r.entries]);
-      setNext(r.nextBefore);
+      setNext(r.nextCursor);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load');
     } finally {
