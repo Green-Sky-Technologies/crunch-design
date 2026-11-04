@@ -79,11 +79,17 @@ export async function assertNotLockedByOther(
   actor: Actor,
   projectId: string,
 ): Promise<void> {
-  const cutoff = new Date(Date.now() - EDIT_LOCK_TTL_MS);
+  // Compare against the database clock: heartbeat_at is written by Postgres (defaultNow()), so
+  // mixing in the app server's clock (Date.now()) breaks under clock skew between the two.
   const [lock] = await db
     .select({ holder: editLocks.holderUserId })
     .from(editLocks)
-    .where(and(eq(editLocks.projectId, projectId), gt(editLocks.heartbeatAt, cutoff)))
+    .where(
+      and(
+        eq(editLocks.projectId, projectId),
+        sql`${editLocks.heartbeatAt} > now() - make_interval(secs => ${EDIT_LOCK_TTL_MS / 1000})`,
+      ),
+    )
     .limit(1);
   if (lock && lock.holder !== actor.userId) throw new LockedError(lock.holder);
 }
