@@ -60,6 +60,72 @@ describe('diffSystemsForDoc (Story 4.3 preview)', () => {
     });
   });
 
+  it('follows nested components and compares theme values', () => {
+    // Card nests a Button; the doc only instantiates Card.
+    const withCard = (button: (s: ReturnType<typeof starterDesignSystem>) => void) => {
+      const s = starterDesignSystem();
+      s.components.Card = {
+        id: 'Card',
+        name: 'Card',
+        props: {},
+        variants: {},
+        rootNodeId: 'n_cardroot1',
+        nodes: {
+          n_cardroot1: {
+            id: 'n_cardroot1',
+            type: 'box',
+            tag: 'div',
+            parentId: null,
+            children: ['n_cardbtn01'],
+            positioning: 'flow',
+            props: {},
+            style: {},
+          },
+          n_cardbtn01: {
+            id: 'n_cardbtn01',
+            type: 'instance',
+            parentId: 'n_cardroot1',
+            children: [],
+            positioning: 'flow',
+            style: {},
+            componentRef: { componentId: 'Button', variant: {} },
+            props: { values: {} },
+          },
+        },
+        variantStyles: [],
+      };
+      button(s);
+      return s;
+    };
+    const doc = sampleLandingDoc();
+    for (const n of Object.values(doc.nodes))
+      if (n.type === 'instance') n.componentRef = { componentId: 'Card', variant: {} };
+    const cards = Object.values(doc.nodes).filter((n) => n.type === 'instance').length;
+    const from = withCard(() => {});
+    const to = withCard((s) => {
+      s.components.Button!.nodes.n_btnlabel1!.style.base!.fontWeight = {
+        token: 'weight.bold',
+      };
+    });
+    const d = diffSystemsForDoc(doc, from, to);
+    expect(d.components).toEqual([
+      expect.objectContaining({
+        id: 'Button',
+        kind: 'changed',
+        nested: true,
+        instanceCount: cards,
+      }),
+    ]);
+
+    const darker = withCard(() => {});
+    darker.themes.dark!['color.text'] = '#ffffff';
+    const t = diffSystemsForDoc(doc, from, darker);
+    expect(t.unchanged).toBe(false);
+    expect(t.themeTokens).toEqual([
+      { theme: 'dark', path: 'color.text', from: '#f4f4f5', to: '#ffffff' },
+    ]);
+  });
+
   it('flags project token overrides that the target cannot apply', () => {
     const doc = { ...sampleLandingDoc(), tokenOverrides: { 'color.primary': '#000000' } };
     const to = starterDesignSystem();

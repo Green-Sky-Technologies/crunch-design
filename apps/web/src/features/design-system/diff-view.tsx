@@ -61,8 +61,9 @@ export function DiffView({ diff }: { diff: SystemDiff }) {
         <ul className="space-y-1 text-xs">
           {diff.components.map((c) => (
             <li key={c.id}>
-              <strong>{c.name}</strong> ({c.instanceCount} instance
-              {c.instanceCount === 1 ? '' : 's'}):{' '}
+              <strong>{c.name}</strong>
+              {c.nested ? ' (inside other components, ' : ' ('}
+              {c.instanceCount} instance{c.instanceCount === 1 ? '' : 's'}):{' '}
               {c.kind === 'missing' ? (
                 <span className="text-danger">missing, instances show a placeholder</span>
               ) : (
@@ -83,6 +84,16 @@ export function DiffView({ diff }: { diff: SystemDiff }) {
           Breakpoints change: md {diff.breakpoints.from.md}→{diff.breakpoints.to.md}px, lg{' '}
           {diff.breakpoints.from.lg}→{diff.breakpoints.to.lg}px.
         </p>
+      )}
+      {diff.themeTokens.length > 0 && (
+        <ul className="space-y-0.5 text-xs">
+          {diff.themeTokens.map((t) => (
+            <li key={`${t.theme}:${t.path}`}>
+              <span className="text-muted">{t.theme}:</span>{' '}
+              <span className="font-mono">{t.path}</span> {t.from} → {t.to}
+            </li>
+          ))}
+        </ul>
       )}
       {diff.themesRemoved.length > 0 && (
         <p className="text-xs text-danger">Themes removed: {diff.themesRemoved.join(', ')}</p>
