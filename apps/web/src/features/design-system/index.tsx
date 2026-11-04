@@ -2,11 +2,15 @@
  * Design systems (Epic 4). `DesignSystemsPage` is the server component rendered by
  * /w/[slug]/design-systems (export name and props are part of the shell contract).
  */
+import { can } from '@crunch/authz';
 import Link from 'next/link';
 import { db, requireActor } from '@/server/context';
 import { listDesignSystems } from '@/server/services/design-systems';
+import { listProjectDesignSystems } from '@/server/services/project-design-system';
+import { ProjectsTable } from './projects-table';
 
 export { DesignSystemEditor } from './editor/design-system-editor';
+export { DesignSystemUpgradeNotice, type UpgradeNoticeProps } from './upgrade-notice';
 
 export async function DesignSystemsPage({
   workspaceSlug,
@@ -15,7 +19,10 @@ export async function DesignSystemsPage({
   canEdit: boolean;
 }) {
   const actor = await requireActor(workspaceSlug);
-  const systems = await listDesignSystems(db(), actor);
+  const [systems, projects] = await Promise.all([
+    listDesignSystems(db(), actor),
+    listProjectDesignSystems(db(), actor),
+  ]);
   const base = `/w/${workspaceSlug}/design-systems`;
 
   return (
@@ -48,6 +55,19 @@ export async function DesignSystemsPage({
           </li>
         ))}
       </ul>
+
+      <section className="mt-10">
+        <h2 className="mb-1 text-lg font-semibold tracking-tight">Projects</h2>
+        <p className="mb-3 text-sm text-muted">
+          Each project pins a published version. Editing a draft never changes them; upgrade when
+          you&apos;re ready.
+        </p>
+        <ProjectsTable
+          workspaceSlug={workspaceSlug}
+          projects={projects}
+          canUpdate={can(actor.role, 'project:update')}
+        />
+      </section>
     </main>
   );
 }

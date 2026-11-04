@@ -19,7 +19,13 @@ import {
   updateDesignSystemDetails,
   upsertDesignSystemComponent,
 } from '@/server/services/design-systems';
-import { createProject } from '@/server/services/projects';
+import {
+  latestPublishedVersionId,
+  listProjectDesignSystems,
+  pinProjectDesignSystemVersion,
+  resolveProjectDesignSystem,
+} from '@/server/services/project-design-system';
+import { createProject, getProject } from '@/server/services/projects';
 import { NotFoundError, ValidationError } from '@/server/services/types';
 import { makeActor, reset, testDb } from './helpers';
 
@@ -293,5 +299,82 @@ describe('design systems', () => {
       }),
     ).rejects.toBeInstanceOf(NotFoundError);
     await expect(getDesignSystem(db, editor, 'nope')).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+describe('project pinning and upgrades (Story 4.2)', () => {
+  const primary = async (actor: Awaited<ReturnType<typeof makeActor>>, projectId: string) => {
+    const r = await resolveProjectDesignSystem(db, actor, await getProject(db, actor, projectId));
+    return { version: r.version, color: r.spec.tokens['color.primary']!.value, r };
+  };
+  const setPrimary = (actor: Awaited<ReturnType<typeof makeActor>>, id: string, value: string) =>
+    setDesignSystemToken(db, actor, id, 'color.primary', { type: 'color', value });
+
+  it('editing a draft never changes pinned projects; upgrades are explicit', async () => {
+    const editor = await makeActor(db, 'editor');
+    const ds = await defaultSystem(editor);
+    const p1 = await createProject(db, editor, { name: 'P1' });
+
+    // Before anything is published, projects render the draft.
+    await setPrimary(editor, ds.id, '#111111');
+    expect(await primary(editor, p1.id)).toMatchObject({ version: null, color: '#111111' });
+
+    // Publishing pins existing projects to what they were showing.
+    await publishDesignSystem(db, editor, ds.id);
+    expect((await getProject(db, editor, p1.id)).designSystemVersionId).toBeTruthy();
+    await setPrimary(editor, ds.id, '#222222');
+    expect(await primary(editor, p1.id)).toMatchObject({ version: 1, color: '#111111' });
+
+    // A project created after publishing renders the latest published version, not the draft.
+    const p2 = await createProject(db, editor, { name: 'P2' });
+    expect(await primary(editor, p2.id)).toMatchObject({ version: 1, color: '#111111' });
+
+    await publishDesignSystem(db, editor, ds.id, { notes: 'New primary' });
+    await setPrimary(editor, ds.id, '#333333');
+    for (const p of [p1, p2]) {
+      const s = await primary(editor, p.id);
+      expect(s).toMatchObject({ version: 1, color: '#111111' });
+      expect(s.r).toMatchObject({ pinned: true, latestVersion: 2, upgradeAvailable: true });
+    }
+    expect(
+      (await listProjectDesignSystems(db, editor)).map((s) => [s.projectName, s.upgradeAvailable]),
+    ).toEqual([
+      ['P1', true],
+      ['P2', true],
+    ]);
+
+    // Upgrade, then roll back.
+    const up = await pinProjectDesignSystemVersion(db, editor, p1.id);
+    expect(up).toMatchObject({ version: 2, upgradeAvailable: false });
+    expect((await primary(editor, p1.id)).color).toBe('#222222');
+    await pinProjectDesignSystemVersion(db, editor, p1.id, 1);
+    expect((await primary(editor, p1.id)).version).toBe(1);
+    await expect(pinProjectDesignSystemVersion(db, editor, p1.id, 7)).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
+
+    const v2 = (await listDesignSystemVersions(db, editor, ds.id))[0]!;
+    expect(await latestPublishedVersionId(db, editor.workspace.id, ds.id)).toBe(v2.id);
+  });
+
+  it('only project editors in the same workspace can upgrade', async () => {
+    const editor = await makeActor(db, 'editor');
+    const viewer = await makeActor(db, 'viewer', editor.workspace);
+    const outsider = await makeActor(db, 'admin');
+    const ds = await defaultSystem(editor);
+    const p = await createProject(db, editor, { name: 'P' });
+    // nothing published yet
+    await expect(pinProjectDesignSystemVersion(db, editor, p.id)).rejects.toBeInstanceOf(
+      ValidationError,
+    );
+    await publishDesignSystem(db, editor, ds.id);
+    await expect(pinProjectDesignSystemVersion(db, viewer, p.id)).rejects.toBeInstanceOf(
+      ForbiddenError,
+    );
+    await expect(pinProjectDesignSystemVersion(db, outsider, p.id)).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
+    expect(await latestPublishedVersionId(db, outsider.workspace.id, ds.id)).toBeNull();
+    expect(await listProjectDesignSystems(db, outsider)).toEqual([]);
   });
 });

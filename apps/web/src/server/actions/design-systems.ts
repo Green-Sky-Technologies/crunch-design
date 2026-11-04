@@ -11,12 +11,14 @@ import {
   archiveDesignSystem,
   createDesignSystem,
   discardDesignSystemDraft,
+  getDesignSystemVersionSpec,
   publishDesignSystem,
   saveDesignSystemDraft,
   setDefaultDesignSystem,
   updateDesignSystemDetails,
   type NewSystemSource,
 } from '../services/design-systems';
+import { pinProjectDesignSystemVersion } from '../services/project-design-system';
 import { run, type ActionResult } from './result';
 
 const base = (slug: string) => `/w/${slug}/design-systems`;
@@ -68,11 +70,13 @@ export async function discardDesignSystemDraftAction(
 export async function publishDesignSystemAction(
   id: string,
   notes?: string,
-): Promise<ActionResult<{ version: number }>> {
+  baseRevision?: string,
+): Promise<ActionResult<{ version: number; revision: string }>> {
   const actor = await requireActor();
-  const res = await run(async () => ({
-    version: (await publishDesignSystem(db(), actor, id, { notes })).version,
-  }));
+  const res = await run(async () => {
+    const v = await publishDesignSystem(db(), actor, id, { notes, baseRevision });
+    return { version: v.version, revision: v.revision };
+  });
   revalidatePath(base(actor.workspace.slug), 'layout');
   return res;
 }
@@ -94,5 +98,26 @@ export async function archiveDesignSystemAction(id: string): Promise<ActionResul
     return undefined;
   });
   revalidatePath(base(actor.workspace.slug), 'layout');
+  return res;
+}
+
+export async function getDesignSystemVersionSpecAction(
+  id: string,
+  version: number,
+): Promise<ActionResult<DesignSystemSpec>> {
+  const actor = await requireActor();
+  return run(() => getDesignSystemVersionSpec(db(), actor, id, version));
+}
+
+/** Pin a project to a published version of its system (default: latest). The upgrade prompt. */
+export async function upgradeProjectDesignSystemAction(
+  projectId: string,
+  version?: number,
+): Promise<ActionResult<{ version: number | null }>> {
+  const actor = await requireActor();
+  const res = await run(async () => ({
+    version: (await pinProjectDesignSystemVersion(db(), actor, projectId, version)).version,
+  }));
+  revalidatePath(`/w/${actor.workspace.slug}`, 'layout');
   return res;
 }

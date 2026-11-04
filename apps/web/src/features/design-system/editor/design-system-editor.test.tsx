@@ -12,7 +12,9 @@ vi.mock('@/server/actions/design-systems', () => ({
     return { ok: true, data: { revision: String(saved.length), spec } };
   }),
   updateDesignSystemDetailsAction: vi.fn(async () => ({ ok: true, data: undefined })),
-  publishDesignSystemAction: vi.fn(async () => ({ ok: true, data: { version: 1 } })),
+  publishDesignSystemAction: vi.fn(async () => ({ ok: true, data: { version: 1, revision: 'p' } })),
+  getDesignSystemVersionSpecAction: vi.fn(),
+  upgradeProjectDesignSystemAction: vi.fn(),
   discardDesignSystemDraftAction: vi.fn(),
 }));
 vi.mock('next/link', () => ({
@@ -32,6 +34,7 @@ const system = {
   description: null,
   isDefault: true,
   latestVersion: null,
+  hasUnpublishedChanges: true,
   revision: '0',
 };
 
@@ -97,5 +100,30 @@ describe('DesignSystemEditor', () => {
     );
     expect(screen.queryByRole('button', { name: 'Save draft' })).toBeNull();
     expect(screen.queryByLabelText('New token path')).toBeNull();
+  });
+
+  it('publishes the saved draft with notes, but not while there are unsaved edits', async () => {
+    const { publishDesignSystemAction } = await import('@/server/actions/design-systems');
+    render(
+      <DesignSystemEditor
+        workspaceSlug="ws"
+        system={system}
+        initialDraft={starterDesignSystem()}
+        canEdit
+      />,
+    );
+    const publish = screen.getByRole('button', { name: 'Publish…' });
+    fireEvent.change(screen.getByLabelText('color.text value'), { target: { value: '#000000' } });
+    expect(publish).toHaveProperty('disabled', true);
+    fireEvent.click(screen.getByRole('button', { name: 'Revert' }));
+    expect(publish).toHaveProperty('disabled', false);
+
+    fireEvent.click(publish);
+    fireEvent.change(screen.getByLabelText('Release notes'), { target: { value: 'First cut' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
+    });
+    expect(publishDesignSystemAction).toHaveBeenCalledWith('ds1', 'First cut', '0');
+    expect(screen.getByText(/Published v1/)).toBeTruthy();
   });
 });

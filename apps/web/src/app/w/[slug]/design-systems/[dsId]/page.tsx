@@ -23,9 +23,11 @@ export default async function Page({ params }: PageProps<'/w/[slug]/design-syste
         description: system.description,
         isDefault: system.isDefault,
         latestVersion: system.latestVersion,
+        hasUnpublishedChanges: system.hasUnpublishedChanges,
         revision: system.revision,
       }}
       initialDraft={detail.draft}
+      versions={detail.versions}
       canEdit={can(actor.role, 'design_system:edit')}
     />
   );

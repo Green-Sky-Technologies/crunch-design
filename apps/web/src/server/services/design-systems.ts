@@ -156,6 +156,24 @@ async function versionSpec(
   return v ? validateSpecOrThrow(v.spec) : null;
 }
 
+async function versionId(
+  conn: Conn,
+  designSystemId: string,
+  version: number,
+): Promise<string | null> {
+  const [v] = await conn
+    .select({ id: designSystemVersions.id })
+    .from(designSystemVersions)
+    .where(
+      and(
+        eq(designSystemVersions.designSystemId, designSystemId),
+        eq(designSystemVersions.version, version),
+      ),
+    )
+    .limit(1);
+  return v?.id ?? null;
+}
+
 async function summarize(conn: Conn, rows: DesignSystem[]): Promise<DesignSystemSummary[]> {
   if (!rows.length) return [];
   const ids = rows.map((r) => r.id);
@@ -471,12 +489,17 @@ export async function publishDesignSystem(
   db: Db,
   actor: Actor,
   id: string,
-  input: { notes?: unknown } = {},
-): Promise<DesignSystemVersionSummary> {
+  input: { notes?: unknown; baseRevision?: string } = {},
+): Promise<DesignSystemVersionSummary & { revision: string }> {
   assertCan(actor.role, 'design_system:edit');
   const notes = input.notes ? parseField(notesSchema, input.notes, 'notes') || null : null;
   return db.transaction(async (tx) => {
     const row = await loadRow(tx, actor, id, { lock: true });
+    if (input.baseRevision !== undefined && input.baseRevision !== revisionOf(row))
+      throw new ValidationError(
+        'The draft changed since you loaded it. Reload and review it before publishing.',
+        { revision: ['stale'] },
+      );
     const spec = validateSpecOrThrow(draftSpecOf(row));
     if (row.latestVersion !== null) {
       const latest = await versionSpec(tx, row.id, row.latestVersion);
@@ -484,6 +507,8 @@ export async function publishDesignSystem(
         throw new ValidationError(`Nothing changed since version ${row.latestVersion}`);
     }
     const version = (row.latestVersion ?? 0) + 1;
+    const previousId =
+      row.latestVersion === null ? null : await versionId(tx, row.id, row.latestVersion);
     const [v] = await tx
       .insert(designSystemVersions)
       .values({
@@ -495,16 +520,31 @@ export async function publishDesignSystem(
         publishedBy: actor.userId,
       })
       .returning();
-    await tx
+    const [updated] = await tx
       .update(designSystems)
-      .set({ latestVersion: version, draft: spec, updatedBy: actor.userId })
-      .where(eq(designSystems.id, row.id));
+      .set({ latestVersion: version, draft: spec, updatedBy: actor.userId, updatedAt: new Date() })
+      .where(eq(designSystems.id, row.id))
+      .returning();
+    // Publishing never changes what an existing project renders. Unpinned projects were showing
+    // the previous latest version (or, before the first publish, the draft that just became v1),
+    // so pin them to exactly that. They then get the upgrade prompt for the new version.
+    await tx
+      .update(projects)
+      .set({ designSystemVersionId: previousId ?? v!.id })
+      .where(
+        and(
+          eq(projects.workspaceId, actor.workspace.id),
+          eq(projects.designSystemId, row.id),
+          isNull(projects.designSystemVersionId),
+        ),
+      );
     return {
       id: v!.id,
       version: v!.version,
       notes: v!.notes,
       publishedBy: v!.publishedBy,
       publishedAt: v!.publishedAt,
+      revision: revisionOf(updated!),
     };
   });
 }
