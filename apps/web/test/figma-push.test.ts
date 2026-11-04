@@ -13,6 +13,7 @@ import { NotFoundError } from '@/server/services/types';
 import { upsertMember } from '@/server/services/workspaces';
 import type { Actor } from '@/server/services/types';
 import { makeActor, reset, testDb } from './helpers';
+import { mirrorVerifier } from './figma-membership';
 
 const { db, close } = testDb();
 afterAll(close);
@@ -38,7 +39,7 @@ async function landingProject(actor: Actor) {
 const planRoute = pluginRoute<{ projectId: string }>(
   async ({ req, actor, db, params }) =>
     buildPushPlan(db, actor, params.projectId, await pluginBody(req, pushPlanRequest, 16_384)),
-  { db: () => db },
+  { db: () => db, verify: mirrorVerifier(db) },
 );
 
 describe('push plan', () => {

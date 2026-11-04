@@ -20,6 +20,8 @@ import {
   authenticatePluginToken,
   bearerFrom,
   InvalidTokenError,
+  MembershipUnavailableError,
+  type MembershipVerifier,
   type PluginActor,
 } from '../plugin-tokens';
 import { NotFoundError, ValidationError } from '../types';
@@ -73,6 +75,8 @@ export function pluginError(req: Request, err: unknown): Response {
     return json(req, { error: 'unauthorized', message: err.message }, 401, {
       'WWW-Authenticate': 'Bearer',
     });
+  if (err instanceof MembershipUnavailableError)
+    return json(req, { error: 'unavailable', message: err.message }, 503, { 'Retry-After': '60' });
   if (err instanceof RateLimitedError)
     return json(req, { error: 'rate_limited', message: err.message }, 429, {
       'Retry-After': String(err.retryAfter),
@@ -139,6 +143,8 @@ export interface PluginContext<P> {
 export interface PluginRouteOptions {
   /** Injected in tests; defaults to the shared pool. */
   db?: () => Db;
+  /** Injected in tests; defaults to Clerk's backend API. */
+  verify?: MembershipVerifier;
 }
 
 /** Wrap a plugin route handler with CORS, bearer auth, rate limiting and error mapping. */
@@ -155,7 +161,9 @@ export function pluginRoute<P = Record<string, never>>(
       const db = (opts.db ?? (() => getDb()))();
       let actor: PluginActor;
       try {
-        actor = await authenticatePluginToken(db, bearerFrom(req.headers.get('authorization')));
+        actor = await authenticatePluginToken(db, bearerFrom(req.headers.get('authorization')), {
+          verify: opts.verify,
+        });
       } catch (e) {
         if (e instanceof InvalidTokenError) authFailLimiter.check(clientKey(req));
         throw e;

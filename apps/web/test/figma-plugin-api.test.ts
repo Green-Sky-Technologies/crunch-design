@@ -18,6 +18,7 @@ import { createPluginToken } from '@/server/services/plugin-tokens';
 import { upsertMember } from '@/server/services/workspaces';
 import type { Actor } from '@/server/services/types';
 import { makeActor, reset, testDb } from './helpers';
+import { mirrorVerifier } from './figma-membership';
 
 const { db, close } = testDb();
 afterAll(close);
@@ -38,11 +39,11 @@ const req = (path: string, init: RequestInit & { token?: string; origin?: string
 
 const projectsRoute = pluginRoute(
   async ({ actor, db }) => ({ projects: await listProjectsForPlugin(db, actor) }),
-  { db: () => db },
+  { db: () => db, verify: mirrorVerifier(db) },
 );
 const framesRoute = pluginRoute<{ projectId: string }>(
   async ({ actor, db, params }) => listFramesForPlugin(db, actor, params.projectId),
-  { db: () => db },
+  { db: () => db, verify: mirrorVerifier(db) },
 );
 
 describe('plugin API auth and CORS', () => {
@@ -90,7 +91,7 @@ describe('plugin API auth and CORS', () => {
         assertCan(actor.role, 'design:edit');
         return { ok: true };
       },
-      { db: () => db },
+      { db: () => db, verify: mirrorVerifier(db) },
     );
     expect((await editRoute(req('/x', { token }))).status).toBe(403);
     await upsertMember(db, viewer.workspace.id, viewer.userId, 'editor');
@@ -116,10 +117,26 @@ describe('plugin API auth and CORS', () => {
     expect(res.headers.get('access-control-allow-origin')).toBeNull();
   });
 
+  it('returns 503 (fail closed) when membership cannot be verified with Clerk', async () => {
+    const editor = await member('editor');
+    const { token } = await createPluginToken(db, editor, { name: 'fig' });
+    const route = pluginRoute(async () => ({ ok: true }), {
+      db: () => db,
+      verify: async () => {
+        throw new Error('clerk down');
+      },
+    });
+    const res = await route(req('/me', { token }));
+    expect(res.status).toBe(503);
+  });
+
   it('rate-limits per token', async () => {
     const editor = await member('editor');
     const { token } = await createPluginToken(db, editor, { name: 'fig' });
-    const meRoute = pluginRoute(async () => ({ ok: true }), { db: () => db });
+    const meRoute = pluginRoute(async () => ({ ok: true }), {
+      db: () => db,
+      verify: mirrorVerifier(db),
+    });
     let last = 0;
     for (let i = 0; i <= PLUGIN_RATE_LIMIT; i++)
       last = (await meRoute(req('/me', { token }))).status;

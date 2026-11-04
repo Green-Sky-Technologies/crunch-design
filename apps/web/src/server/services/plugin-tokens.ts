@@ -162,15 +162,68 @@ export interface PluginActor extends Actor {
   tokenId: string;
 }
 
+/** Membership as Clerk (the source of truth) sees it right now. Throws if Clerk is unreachable. */
+export type MembershipVerifier = (
+  clerkOrgId: string,
+  userId: string,
+) => Promise<{ member: false } | { member: true; role: Role }>;
+
+/** Re-check membership with Clerk when the last check is older than this. */
+export const MEMBERSHIP_RECHECK_MS = 10 * 60 * 1000;
+/** If Clerk is unreachable, keep honouring a successful check this old, then fail closed. */
+export const MEMBERSHIP_GRACE_MS = 30 * 60 * 1000;
+
+export class MembershipUnavailableError extends Error {
+  override name = 'MembershipUnavailableError';
+  constructor() {
+    super('Could not verify workspace membership; try again shortly');
+  }
+}
+
+/** tokenId -> last successful Clerk verification (per server instance). */
+const verifiedAt = new Map<string, number>();
+const MAX_VERIFIED_ENTRIES = 10_000;
+
+/** For tests: forget cached verifications. */
+export function resetMembershipCache() {
+  verifiedAt.clear();
+}
+
+/** Default verifier: Clerk's backend API (loaded lazily so services stay framework-free). */
+export const clerkMembershipVerifier: MembershipVerifier = async (clerkOrgId, userId) => {
+  const { clerkClient } = await import('@clerk/nextjs/server');
+  const { roleFromClerk } = await import('@crunch/authz');
+  const client = await clerkClient();
+  const list = await client.organizations.getOrganizationMembershipList({
+    organizationId: clerkOrgId,
+    userId: [userId],
+    limit: 1,
+  });
+  const m = list.data.find((x) => x.publicUserData?.userId === userId);
+  return m ? { member: true, role: roleFromClerk(m.role) } : { member: false };
+};
+
+export interface AuthenticateOptions {
+  now?: Date;
+  verify?: MembershipVerifier;
+}
+
 /**
  * Resolve a plugin token to an actor. Throws InvalidTokenError for anything that isn't a live
  * token of a current member of a live workspace (all reported the same way, to avoid oracles).
+ *
+ * The `members` mirror only changes on Clerk webhooks or the user's own sign-in, so membership
+ * is re-verified against Clerk every MEMBERSHIP_RECHECK_MS: a removed member's token is revoked,
+ * a role change updates the mirror, and if Clerk is unreachable past the grace period, requests
+ * fail closed (MembershipUnavailableError).
  */
 export async function authenticatePluginToken(
   db: Db,
   token: string | null,
-  now: Date = new Date(),
+  opts: AuthenticateOptions = {},
 ): Promise<PluginActor> {
+  const now = opts.now ?? new Date();
+  const verify = opts.verify ?? clerkMembershipVerifier;
   if (!token || !TOKEN_RE.test(token)) throw new InvalidTokenError();
   const [hit] = await db
     .select({ token: pluginTokens, workspace: workspaces, role: members.role })
@@ -186,11 +239,48 @@ export async function authenticatePluginToken(
     .where(eq(pluginTokens.tokenHash, hashPluginToken(token)))
     .limit(1);
   if (!hit || hit.token.revokedAt || hit.workspace.deletedAt) throw new InvalidTokenError();
-  const role = hit.role as Role;
+  let role = hit.role as Role;
   if (!ROLES.includes(role)) throw new InvalidTokenError();
 
-  const last = hit.token.lastUsedAt?.getTime() ?? 0;
-  if (now.getTime() - last > TOUCH_INTERVAL_MS) {
+  const last = verifiedAt.get(hit.token.id) ?? 0;
+  if (now.getTime() - last > MEMBERSHIP_RECHECK_MS) {
+    let result: Awaited<ReturnType<MembershipVerifier>> | null = null;
+    try {
+      result = await verify(hit.workspace.clerkOrgId, hit.token.userId);
+    } catch {
+      if (now.getTime() - last > MEMBERSHIP_GRACE_MS) throw new MembershipUnavailableError();
+    }
+    if (result && !result.member) {
+      // Clerk says they're gone: revoke the token and correct the mirror.
+      await db
+        .update(pluginTokens)
+        .set({ revokedAt: now })
+        .where(eq(pluginTokens.id, hit.token.id));
+      await db
+        .delete(members)
+        .where(
+          and(eq(members.workspaceId, hit.workspace.id), eq(members.userId, hit.token.userId)),
+        );
+      verifiedAt.delete(hit.token.id);
+      throw new InvalidTokenError();
+    }
+    if (result?.member) {
+      if (result.role !== role) {
+        await db
+          .update(members)
+          .set({ role: result.role })
+          .where(
+            and(eq(members.workspaceId, hit.workspace.id), eq(members.userId, hit.token.userId)),
+          );
+        role = result.role;
+      }
+      if (verifiedAt.size >= MAX_VERIFIED_ENTRIES) verifiedAt.clear();
+      verifiedAt.set(hit.token.id, now.getTime());
+    }
+  }
+
+  const lastUsed = hit.token.lastUsedAt?.getTime() ?? 0;
+  if (now.getTime() - lastUsed > TOUCH_INTERVAL_MS) {
     await db.update(pluginTokens).set({ lastUsedAt: now }).where(eq(pluginTokens.id, hit.token.id));
   }
   return { userId: hit.token.userId, role, workspace: hit.workspace, tokenId: hit.token.id };
