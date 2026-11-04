@@ -101,6 +101,8 @@ export interface MessageView {
   touched: string[];
   txnIds: string[];
   jobSuggestion: JobSuggestion | null;
+  /** User messages: the selection/frame the prompt was sent with (retry reuses it). */
+  context: TurnContextRef | null;
   jobId: string | null;
   snapshotVersionId: string | null;
   attachments: Attachment[];
@@ -131,7 +133,14 @@ export function toMessageView(row: AgentMessageRow): MessageView {
   };
   if (row.role === 'user') {
     const c = row.content as StoredUserContent;
-    return { ...base, text: c.prompt ?? '', activity: [], touched: [], jobSuggestion: null };
+    return {
+      ...base,
+      text: c.prompt ?? '',
+      activity: [],
+      touched: [],
+      jobSuggestion: null,
+      context: c.context ?? null,
+    };
   }
   const c = (row.content ?? { v: 1, turns: [] }) as StoredAssistantContent;
   const texts = (c.turns ?? [])
@@ -144,6 +153,7 @@ export function toMessageView(row: AgentMessageRow): MessageView {
     activity: c.activity ?? [],
     touched: c.touched ?? [],
     jobSuggestion: c.jobSuggestion ?? null,
+    context: null,
   };
 }
 

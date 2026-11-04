@@ -84,6 +84,7 @@ describe('interactive agent', () => {
     const chat = await getProjectChat(db, editor, project.id);
     expect(chat.messages.map((m) => m.role)).toEqual(['user', 'assistant']);
     expect(chat.messages[0]!.text).toBe('more space between sections');
+    expect(chat.messages[0]!.context).toMatchObject({ selection: [rootId] });
   });
 
   it('sends earlier turns as history on the next message', async () => {

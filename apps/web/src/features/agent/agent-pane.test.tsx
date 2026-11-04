@@ -242,6 +242,56 @@ describe('AgentPane', () => {
     expect(await screen.findByText('Revert agent change')).toBeTruthy();
   });
 
+  it('keeps the job card status and Cancel on unexpected events, and leaves the composer usable', async () => {
+    initialMessages = [
+      view({ id: 'u1', role: 'user', seq: 1, text: 'Design a pricing page' }),
+      view({ id: 'a1', seq: 2, status: 'streaming', jobId: 'j1' }),
+    ];
+    renderPane();
+    const card = await screen.findByTestId('job-card');
+    const jobStream = FakeEventSource.all.find((e) => e.url === '/api/jobs/j1/events')!;
+    act(() => jobStream.emit('status', { seq: 2, type: 'status', data: { status: 'running' } }));
+    // An event without a valid status (e.g. an old sandbox's phase report) must not wipe it.
+    act(() =>
+      jobStream.emit('status', { seq: 3, type: 'status', data: { phase: 'agent_started' } }),
+    );
+    act(() =>
+      jobStream.emit('progress', { seq: 4, type: 'progress', data: { phase: 'agent_started' } }),
+    );
+    expect(card.dataset.status).toBe('running');
+    expect(screen.getByText('Cancel job')).toBeTruthy();
+    // A running job doesn't block chatting.
+    fireEvent.change(screen.getByLabelText('Message the agent'), { target: { value: 'tweak' } });
+    expect((screen.getByText('Send') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('retry resends the original selection, frame and model', async () => {
+    initialMessages = [
+      view({
+        id: 'u1',
+        role: 'user',
+        seq: 1,
+        text: 'bigger',
+        context: { selection: ['n_herotitle1'], frameId: 'f_desktop001' },
+      }),
+      view({ id: 'a1', seq: 2, status: 'error', error: 'boom', model: 'claude-opus-5-5' }),
+    ];
+    renderPane();
+    fireEvent.click(await screen.findByText('Retry'));
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.filter((c) => c[0] === '/api/agent/messages')).toHaveLength(1),
+    );
+    const body = JSON.parse(
+      fetchMock.mock.calls.find((c) => c[0] === '/api/agent/messages')![1].body,
+    );
+    expect(body).toMatchObject({
+      prompt: 'bigger',
+      selection: ['n_herotitle1'],
+      frameId: 'f_desktop001',
+      model: 'claude-opus-5-5',
+    });
+  });
+
   it('viewers get no composer', async () => {
     renderPane('viewer');
     expect(screen.getByText(/You have view access/)).toBeTruthy();

@@ -33,6 +33,7 @@ export interface MessageView {
   touched: string[];
   txnIds: string[];
   jobSuggestion: JobSuggestion | null;
+  context?: { selection?: string[]; frameId?: string | null; scopeNodeId?: string } | null;
   jobId: string | null;
   snapshotVersionId: string | null;
   attachments: Attachment[];

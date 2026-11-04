@@ -16,7 +16,16 @@ export interface AgentChat {
   loading: boolean;
   error: string | null;
   busy: boolean;
-  send(prompt: string, opts?: { attachments?: Attachment[]; model?: string }): Promise<void>;
+  send(
+    prompt: string,
+    opts?: {
+      attachments?: Attachment[];
+      model?: string;
+      /** Override the current canvas selection (retry resends the original context). */
+      selection?: string[];
+      frameId?: string | null;
+    },
+  ): Promise<void>;
   cancel(messageId: string): Promise<void>;
   retry(assistantMessageId: string): Promise<void>;
   /** Replace one message (e.g. after a job starts). */
@@ -100,13 +109,14 @@ export function useAgentChat(projectId: string, load: boolean, enabled: boolean)
     async (prompt, opts = {}) => {
       setError(null);
       const { selection } = store.getState();
+      const nodeIds = opts.selection ?? selection.nodeIds;
       const body: SendBody = {
         projectId,
         conversationId: conversationId ?? undefined,
         prompt,
         model: opts.model,
-        selection: selection.nodeIds.length ? selection.nodeIds : undefined,
-        frameId: selection.frameId,
+        selection: nodeIds.length ? nodeIds : undefined,
+        frameId: opts.frameId !== undefined ? opts.frameId : selection.frameId,
         attachments: opts.attachments?.length ? opts.attachments : undefined,
       };
       try {
@@ -175,7 +185,14 @@ export function useAgentChat(projectId: string, load: boolean, enabled: boolean)
         .slice(0, i)
         .reverse()
         .find((m) => m.role === 'user');
-      if (user) await send(user.text, { attachments: user.attachments });
+      const failed = messages[i];
+      if (user)
+        await send(user.text, {
+          attachments: user.attachments,
+          model: failed?.model ?? undefined,
+          selection: user.context?.selection ?? [],
+          frameId: user.context?.frameId ?? null,
+        });
     },
     [messages, send],
   );
@@ -185,7 +202,8 @@ export function useAgentChat(projectId: string, load: boolean, enabled: boolean)
     conversationId,
     loading,
     error,
-    busy: messages.some((m) => ACTIVE.has(m.status)),
+    // A background job doesn't block the composer: its card has its own progress and Cancel.
+    busy: messages.some((m) => ACTIVE.has(m.status) && !m.jobId),
     send,
     cancel,
     retry,

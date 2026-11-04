@@ -83,8 +83,14 @@ export function JobCard({
 
   useEffect(() => {
     const onEvent = (e: JobEvent) => {
-      if (e.type === 'status') setStatus(e.data.status as JobStatus);
-      else if (e.type === 'frame') {
+      // Only server-written status events with a known status change the card; anything
+      // unexpected is ignored rather than wiping the status (and the Cancel button).
+      if (e.type === 'status') {
+        const next = e.data?.status;
+        if (typeof next === 'string' && next in STATUS_LABEL) setStatus(next as JobStatus);
+      } else if (e.type === 'progress') {
+        if (typeof e.data?.phase === 'string') setLast(e.data.phase.replace(/_/g, ' '));
+      } else if (e.type === 'frame') {
         setFrames((f) => [...f, String(e.data.name ?? e.data.frameId)]);
         // Frames appear on the canvas as they're built.
         void store
