@@ -1,5 +1,9 @@
 /**
- * @crunch/agent: agent tool handlers, prompts and the interactive agent loop (Epic 5).
- * Skeleton created by foundation; owned by stream-agent (see docs/worktree-plan.md).
+ * @crunch/agent: agent tool handlers, prompts, the interactive agent loop, model catalog and
+ * usage accounting (Epic 5). Server-side; browser code imports the client-safe subpaths only.
  */
-export {};
+export { default as Anthropic } from '@anthropic-ai/sdk';
+export * from './models';
+export * from './usage';
+export * from './sse';
+export * from './stable';
