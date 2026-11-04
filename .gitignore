@@ -19,3 +19,6 @@ infra/**/*.tfvars
 playwright-report/
 test-results/
 .clerk/
+
+# Claude Code agent worktrees (contain copies of local env files)
+.claude/worktrees/
