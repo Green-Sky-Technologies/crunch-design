@@ -2,7 +2,7 @@
 
 /**
  * Collaboration controls in the editor top bar (Epic 6): comments (6.1) with ask-agent
- * requests (5.7), notifications.
+ * requests (5.7), named versions (6.2), notifications.
  * Reads everything from useEditor() / useDocStore(); no props (editor-shell slot).
  */
 import { useEffect } from 'react';
@@ -12,7 +12,8 @@ import { useCommentPinsOverlay } from './comment-pins';
 import { CommentsPanel } from './comments-panel';
 import { Drawer } from './drawer';
 import { NotificationsBell } from './notifications';
-import { useCollab } from './store';
+import { useCollab, type CollabPanel } from './store';
+import { VersionsPanel } from './versions-panel';
 
 const THREAD_POLL_MS = 15_000;
 
@@ -27,25 +28,44 @@ function useThreadSync(projectId: string) {
   }, [projectId, load]);
 }
 
+function PanelButton({
+  id,
+  children,
+}: {
+  id: Exclude<CollabPanel, null>;
+  children: React.ReactNode;
+}) {
+  const active = useCollab((s) => s.panel === id);
+  const toggle = useCollab((s) => s.togglePanel);
+  return (
+    <button
+      className={`btn-ghost px-2 py-1 ${active ? 'bg-surface-2' : ''}`}
+      aria-pressed={active}
+      onClick={() => toggle(id)}
+    >
+      {children}
+    </button>
+  );
+}
+
 export function CollabControls() {
   const { project } = useEditor();
   const panel = useCollab((s) => s.panel);
-  const toggle = useCollab((s) => s.togglePanel);
   const openCount = useCollab((s) => s.threads.filter((t) => t.status === 'open').length);
   useThreadSync(project.id);
   useCommentPinsOverlay();
 
   return (
     <>
-      <button
-        className={`btn-ghost px-2 py-1 ${panel === 'comments' ? 'bg-surface-2' : ''}`}
-        aria-pressed={panel === 'comments'}
-        onClick={() => toggle('comments')}
-      >
-        Comments{openCount ? ` (${openCount})` : ''}
-      </button>
+      <PanelButton id="comments">Comments{openCount ? ` (${openCount})` : ''}</PanelButton>
+      <PanelButton id="versions">Versions</PanelButton>
       <NotificationsBell />
       {panel === 'comments' && <CommentsDrawer />}
+      {panel === 'versions' && (
+        <Drawer title="Versions">
+          <VersionsPanel />
+        </Drawer>
+      )}
     </>
   );
 }
