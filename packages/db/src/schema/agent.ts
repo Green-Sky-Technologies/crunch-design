@@ -114,6 +114,8 @@ export const jobs = pgTable(
     designSystemId: uuid('design_system_id'),
     conversationId: uuid('conversation_id'),
     kind: jobKindEnum('kind').notNull(),
+    /** Model override for jobs started without a chat message (null = workspace tier default). */
+    model: text('model'),
     status: jobStatusEnum('status').notNull().default('queued'),
     input: jsonb('input').notNull(),
     result: jsonb('result'),
@@ -202,12 +204,16 @@ export const llmCalls = pgTable(
     outputTokens: integer('output_tokens').notNull().default(0),
     cacheReadTokens: integer('cache_read_tokens').notNull().default(0),
     cacheWriteTokens: integer('cache_write_tokens').notNull().default(0),
+    /** Portion of cacheWriteTokens written with the 1-hour TTL (billed at 2x vs 1.25x for 5m). */
+    cacheWrite1hTokens: integer('cache_write_1h_tokens').notNull().default(0),
     latencyMs: integer('latency_ms'),
     estCostMicros: bigint('est_cost_micros', { mode: 'number' }).notNull().default(0),
     stopReason: text('stop_reason'),
     ok: boolean('ok').notNull().default(true),
     errorType: text('error_type'),
     requestId: text('request_id'),
+    /** Free-form tags for analysis, e.g. { cacheTtl: '1h', stream: 'interactive' } (ADR 0002). */
+    meta: jsonb('meta'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

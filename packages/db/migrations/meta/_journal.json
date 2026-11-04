@@ -15,6 +15,13 @@
       "when": 1793757487453,
       "tag": "0001_epics_2_8",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793797658499,
+      "tag": "0002_agent_metering",
+      "breakpoints": true
     }
   ]
 }

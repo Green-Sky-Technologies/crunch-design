@@ -184,6 +184,8 @@ async function recordCall(
     outputTokens: usage.outputTokens,
     cacheReadTokens: usage.cacheReadTokens,
     cacheWriteTokens: usage.cacheWriteTokens,
+    cacheWrite1hTokens: usage.cacheWrite1hTokens,
+    meta: { cacheTtl: process.env.AGENT_PREFIX_CACHE_TTL === '5m' ? '5m' : '1h' },
     latencyMs: meta.latencyMs,
     estCostMicros: estimateCostMicros(call.model, usage),
     stopReason: usage.stopReason,

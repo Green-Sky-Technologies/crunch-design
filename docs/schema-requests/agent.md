@@ -9,7 +9,7 @@ For the integration phase. Nothing here blocks Phase 1; each item lists the work
   in `est_cost_micros`, but only the total is stored in `cache_write_tokens`. ADR 0002's
   measurement needs the split.
 - **Workaround:** `est_cost_micros` is correct per call; the split itself isn't persisted.
-- **Code to change after the migration:** `recordCall` in `apps/web/src/server/services/llm-proxy.ts`
+- **Done at integration:** column added (migration 0002); recorded by `recordCall`. Previously: **Code to change after the migration:** `recordCall` in `apps/web/src/server/services/llm-proxy.ts`
   (`usage.cacheWrite1hTokens` is already computed).
 
 ## 2. `llm_calls.meta jsonb` (or `cache_ttl text`)
