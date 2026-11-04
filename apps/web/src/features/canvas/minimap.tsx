@@ -66,7 +66,7 @@ export function Minimap() {
           width={Math.max(1, r.width)}
           height={Math.max(1, r.height)}
           fill={
-            frames[i]!.id === selectedFrame ? 'var(--accent, #ff5a1f)' : 'var(--muted, #9c9a93)'
+            frames[i]!.id === selectedFrame ? 'var(--accent, #cb4b16)' : 'var(--muted, #657b83)'
           }
           opacity={0.45}
         />
@@ -78,7 +78,7 @@ export function Minimap() {
         width={m.viewport.width}
         height={m.viewport.height}
         fill="none"
-        stroke="var(--accent, #ff5a1f)"
+        stroke="var(--accent, #cb4b16)"
         strokeWidth={1.5}
       />
     </svg>

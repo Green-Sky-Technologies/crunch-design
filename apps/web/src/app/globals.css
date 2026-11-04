@@ -1,30 +1,23 @@
 @import 'tailwindcss';
 
-/* App chrome tokens (not the user's design-system tokens, which live in DesignDocs). */
+/*
+ * App chrome tokens: Solarized Light (https://ethanschoonover.com/solarized/).
+ * These style the app itself; a user's design-system tokens live in their DesignDocs and render
+ * inside frames independently of this theme.
+ */
 :root {
-  --bg: #fafaf9;
-  --surface: #ffffff;
-  --surface-2: #f4f4f2;
-  --border: #e6e5e1;
-  --text: #1c1b19;
-  --muted: #6b6a65;
-  --accent: #ff5a1f; /* "crunch" orange */
-  --accent-ink: #ffffff;
-  --danger: #c4321a;
-  --ok: #1f7a4d;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #121211;
-    --surface: #1a1a18;
-    --surface-2: #232320;
-    --border: #2f2e2b;
-    --text: #f1f0ec;
-    --muted: #9c9a93;
-    --accent: #ff6a33;
-    --danger: #ff6b55;
-    --ok: #4fc58a;
-  }
+  color-scheme: light;
+  --bg: #fdf6e3; /* base3 */
+  --surface: #fdf6e3; /* base3 */
+  --surface-2: #eee8d5; /* base2: hovers, canvas backdrop, badges */
+  --border: #e0d9c3; /* between base2 and base1 */
+  --text: #586e75; /* base01: body text, 5.2:1 on base3 */
+  --muted: #657b83; /* base00: secondary text */
+  --accent: #cb4b16; /* orange: keeps the "crunch" accent */
+  --accent-ink: #fdf6e3; /* base3 */
+  --danger: #dc322f; /* red */
+  --ok: #859900; /* green */
+  --focus: #268bd2; /* blue: focus rings and links */
 }
 
 @theme inline {
@@ -47,6 +40,11 @@ body {
   color: var(--text);
 }
 
+::selection {
+  background: #eee8d5; /* base2 */
+  color: #073642; /* base02 */
+}
+
 @utility btn {
   @apply inline-flex items-center justify-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50;
 }
@@ -60,7 +58,7 @@ body {
   @apply btn border border-border bg-surface text-danger hover:bg-surface-2;
 }
 @utility input {
-  @apply w-full rounded-md border border-border bg-surface px-3 py-2 text-sm outline-none placeholder:text-muted focus:border-accent focus:ring-2 focus:ring-accent/20;
+  @apply w-full rounded-md border border-border bg-surface px-3 py-2 text-sm outline-none placeholder:text-muted focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]/20;
 }
 @utility label {
   @apply mb-1 block text-sm font-medium;

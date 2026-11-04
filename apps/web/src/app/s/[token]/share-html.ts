@@ -26,18 +26,18 @@ export function shareHeaders(extra: Record<string, string> = {}): HeadersInit {
 }
 
 const CHROME_CSS = `
-body{margin:0;background:#f4f4f2;font:14px/1.4 system-ui,-apple-system,Segoe UI,sans-serif;color:#1c1b19}
-.cds-bar{position:sticky;top:0;z-index:2147483647;display:flex;gap:4px;align-items:center;padding:8px 16px;background:#fff;border-bottom:1px solid #e6e5e1}
+body{margin:0;background:#eee8d5;font:14px/1.4 system-ui,-apple-system,Segoe UI,sans-serif;color:#586e75}
+.cds-bar{position:sticky;top:0;z-index:2147483647;display:flex;gap:4px;align-items:center;padding:8px 16px;background:#fdf6e3;border-bottom:1px solid #e0d9c3}
 .cds-bar strong{margin-right:auto;font-weight:600}
 .cds-radio{position:absolute;opacity:0;pointer-events:none}
 .cds-bar label{cursor:pointer;padding:4px 10px;border-radius:6px;border:1px solid transparent}
-#cds-fit:checked~.cds-bar label[for=cds-fit],#cds-sm:checked~.cds-bar label[for=cds-sm],#cds-md:checked~.cds-bar label[for=cds-md],#cds-lg:checked~.cds-bar label[for=cds-lg]{border-color:#e6e5e1;background:#f4f4f2}
+#cds-fit:checked~.cds-bar label[for=cds-fit],#cds-sm:checked~.cds-bar label[for=cds-sm],#cds-md:checked~.cds-bar label[for=cds-md],#cds-lg:checked~.cds-bar label[for=cds-lg]{border-color:#e0d9c3;background:#eee8d5}
 .cds-main{padding:24px 16px 64px}
 .cds-section{margin:0 auto 40px;max-width:100%}
 #cds-sm:checked~.cds-main .cds-section{max-width:var(--cds-sm)}
 #cds-md:checked~.cds-main .cds-section{max-width:var(--cds-md)}
 #cds-lg:checked~.cds-main .cds-section{max-width:var(--cds-lg)}
-.cds-label{margin:0 0 8px;font-size:12px;font-weight:500;color:#6b6a65}
+.cds-label{margin:0 0 8px;font-size:12px;font-weight:500;color:#657b83}
 .cds-canvas{background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.08);overflow:hidden}
 `;
 
@@ -90,7 +90,7 @@ export function renderShareError(opts: {
     `<!doctype html>\n<html lang="en"><head><meta charset="utf-8">` +
     `<meta name="viewport" content="width=device-width, initial-scale=1">` +
     `<meta name="robots" content="noindex, nofollow"><title>Link unavailable</title>` +
-    `<style>body{margin:0;display:grid;place-items:center;min-height:100vh;font:15px/1.5 system-ui,sans-serif;background:#fafaf9;color:#1c1b19}main{max-width:28rem;padding:24px;text-align:center}a{color:#c2410c}</style>` +
+    `<style>body{margin:0;display:grid;place-items:center;min-height:100vh;font:15px/1.5 system-ui,sans-serif;background:#fdf6e3;color:#586e75}main{max-width:28rem;padding:24px;text-align:center}a{color:#cb4b16}</style>` +
     `</head><body><main><h1 style="font-size:18px">Link unavailable</h1><p>${esc(msg)}</p>${signIn}</main></body></html>\n`
   );
 }

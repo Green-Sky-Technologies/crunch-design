@@ -13,7 +13,7 @@ export function NewProjectButton() {
       </button>
       {open && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[#002b36]/40 p-4"
           onClick={(e) => e.target === e.currentTarget && setOpen(false)}
           role="dialog"
           aria-modal="true"

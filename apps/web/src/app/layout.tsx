@@ -17,7 +17,16 @@ export default function RootLayout({ children }: LayoutProps<'/'>) {
       <body className="flex min-h-full flex-col font-sans">
         <ClerkProvider
           taskUrls={{ 'choose-organization': '/session-tasks/choose-organization' }}
-          appearance={{ variables: { colorPrimary: '#ff5a1f' } }}
+          appearance={{
+            // Solarized Light, matching globals.css
+            variables: {
+              colorPrimary: '#cb4b16',
+              colorBackground: '#fdf6e3',
+              colorForeground: '#586e75',
+              colorMutedForeground: '#657b83',
+              colorInput: '#fdf6e3',
+            },
+          }}
         >
           {children}
         </ClerkProvider>

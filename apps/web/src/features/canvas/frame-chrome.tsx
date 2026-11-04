@@ -13,7 +13,7 @@ import { useDocStore, useDocStoreApi } from '../doc-store';
 import { useCanvas, useCanvasStoreApi } from './canvas-store';
 import { startGesture } from './gesture';
 
-const ACCENT = 'var(--accent, #ff5a1f)';
+const ACCENT = 'var(--accent, #cb4b16)';
 
 function FrameLabel({ frame, selected }: { frame: Frame; selected: boolean }) {
   const camera = useCanvas((s) => s.camera);
@@ -90,7 +90,7 @@ function FrameLabel({ frame, selected }: { frame: Frame; selected: boolean }) {
         textOverflow: 'ellipsis',
         fontSize: 12,
         lineHeight: '20px',
-        color: selected ? ACCENT : 'var(--muted, #6b6a65)',
+        color: selected ? ACCENT : 'var(--muted, #657b83)',
         fontWeight: selected ? 600 : 400,
       }}
     >

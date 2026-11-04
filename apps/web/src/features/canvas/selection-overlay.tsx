@@ -12,7 +12,7 @@ import { useCanvas, useCanvasStoreApi } from './canvas-store';
 import { frameIndex, useViewportRef } from './context';
 import { nodeElement, worldRect } from './dom';
 
-export const ACCENT = 'var(--accent, #ff5a1f)';
+export const ACCENT = 'var(--accent, #cb4b16)';
 
 export interface Target {
   frameId: string;
@@ -98,7 +98,10 @@ export function DropIndicator() {
     <div data-cd-drop="">
       <Box
         r={worldRectToScreen(camera, drop.container)}
-        style={{ outline: `1px dashed ${ACCENT}`, background: 'rgba(255,90,31,.04)' }}
+        style={{
+          outline: `1px dashed ${ACCENT}`,
+          background: 'color-mix(in srgb, var(--accent, #cb4b16) 5%, transparent)',
+        }}
       />
       <Box
         r={worldRectToScreen(camera, drop.line)}
