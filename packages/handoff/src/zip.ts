@@ -22,7 +22,17 @@ export interface ZipExportOptions extends HtmlExportOptions {
   extraFiles?: Record<string, string | Uint8Array>;
   /** Maximum total bytes of bundled assets (default 50 MB); further assets stay remote. */
   maxAssetBytes?: number;
+  /** Maximum number of images fetched (default 100); further images stay remote. */
+  maxAssets?: number;
+  /** Overall time budget for fetching images (default 30 s); then the rest stay remote. */
+  assetTimeBudgetMs?: number;
 }
+
+export const ZIP_ASSET_DEFAULTS = {
+  maxAssetBytes: 50 * 1024 * 1024,
+  maxAssets: 100,
+  assetTimeBudgetMs: 30_000,
+} as const;
 
 export interface ZipExportResult {
   zip: Uint8Array;
@@ -73,12 +83,19 @@ export async function buildExportZip(
   const bundled = new Map<string, string>(); // src -> assets/<hash>.<ext>
   const remote: string[] = [];
   let total = 0;
-  const cap = opts.maxAssetBytes ?? 50 * 1024 * 1024;
+  let attempts = 0;
+  const cap = opts.maxAssetBytes ?? ZIP_ASSET_DEFAULTS.maxAssetBytes;
+  const maxAssets = opts.maxAssets ?? ZIP_ASSET_DEFAULTS.maxAssets;
+  const budget = AbortSignal.timeout(
+    opts.assetTimeBudgetMs ?? ZIP_ASSET_DEFAULTS.assetTimeBudgetMs,
+  );
   for (const src of sources) {
     let asset = null;
-    if (opts.fetchAsset) {
+    // Check every budget before fetching, not after: count, time, and remaining bytes.
+    if (opts.fetchAsset && attempts < maxAssets && !budget.aborted && total < cap) {
+      attempts++;
       try {
-        asset = await opts.fetchAsset(src);
+        asset = await opts.fetchAsset(src, { signal: budget, maxBytes: cap - total });
       } catch {
         asset = null;
       }

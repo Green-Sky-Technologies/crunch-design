@@ -72,13 +72,29 @@ export async function loadExportSource(
 }
 
 // ---------------------------------------------------------------------------------------------
-// Asset fetching for offline ZIPs: only our own blob storage, https, bounded size and time.
+// Asset fetching for offline ZIPs: https only, an allowlisted host, bounded size and time.
+//
+// Host allowlist: set EXPORT_ASSET_HOSTS (comma-separated exact hostnames, e.g. our store's
+// `<id>.public.blob.vercel-storage.com`) to restrict fetching to our own Blob store. If it is
+// unset, any public Vercel Blob store host is accepted: those are public, static, third-party
+// hosted files (no internal network reachable), and images bundled from them are already
+// rendered by the export as remote <img> sources anyway.
 // ---------------------------------------------------------------------------------------------
 
-const ALLOWED_ASSET_HOST = /^[a-z0-9-]+\.public\.blob\.vercel-storage\.com$/;
-const MAX_ASSET_BYTES = 10 * 1024 * 1024;
+const VERCEL_BLOB_HOST = /^[a-z0-9-]+\.public\.blob\.vercel-storage\.com$/;
+export const MAX_ASSET_BYTES = 10 * 1024 * 1024;
+export const ASSET_TIMEOUT_MS = 10_000;
 
-export function isBundlableAssetUrl(src: string): boolean {
+function allowedHosts(): string[] | null {
+  const raw = process.env.EXPORT_ASSET_HOSTS?.trim();
+  if (!raw) return null;
+  return raw
+    .split(',')
+    .map((h) => h.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+export function isBundlableAssetUrl(src: string, hosts = allowedHosts()): boolean {
   let u: URL;
   try {
     u = new URL(src);
@@ -90,22 +106,59 @@ export function isBundlableAssetUrl(src: string): boolean {
     !u.username &&
     !u.password &&
     (u.port === '' || u.port === '443') &&
-    ALLOWED_ASSET_HOST.test(u.hostname)
+    (hosts ? hosts.includes(u.hostname) : VERCEL_BLOB_HOST.test(u.hostname))
   );
 }
 
-export function blobAssetFetcher(fetchImpl: typeof fetch = fetch): AssetFetcher {
-  return async (src) => {
-    if (!isBundlableAssetUrl(src)) return null; // SSRF guard: never fetch arbitrary hosts
-    const res = await fetchImpl(src, { redirect: 'error', signal: AbortSignal.timeout(10_000) });
-    if (!res.ok) return null;
-    const type = res.headers.get('content-type') ?? '';
-    if (!type.startsWith('image/')) return null;
-    const len = Number(res.headers.get('content-length') ?? 0);
-    if (len > MAX_ASSET_BYTES) return null;
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    if (bytes.byteLength > MAX_ASSET_BYTES) return null;
-    return { bytes, contentType: type };
+/** Read a body, aborting as soon as it exceeds `maxBytes` (content-length may be absent or lie). */
+async function readCapped(res: Response, maxBytes: number): Promise<Uint8Array | null> {
+  if (!res.body) return null;
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > maxBytes) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(size);
+  let off = 0;
+  for (const c of chunks) {
+    out.set(c, off);
+    off += c.byteLength;
+  }
+  return out;
+}
+
+export function blobAssetFetcher(
+  fetchImpl: typeof fetch = fetch,
+  opts: { timeoutMs?: number; hosts?: string[] | null } = {},
+): AssetFetcher {
+  return async (src, { signal, maxBytes }) => {
+    // SSRF guard: never fetch arbitrary hosts.
+    if (!isBundlableAssetUrl(src, opts.hosts === undefined ? allowedHosts() : opts.hosts))
+      return null;
+    const limit = Math.min(MAX_ASSET_BYTES, maxBytes);
+    if (limit <= 0 || signal.aborted) return null;
+    const timeout = AbortSignal.timeout(opts.timeoutMs ?? ASSET_TIMEOUT_MS);
+    const both = AbortSignal.any([signal, timeout]);
+    try {
+      const res = await fetchImpl(src, { redirect: 'error', signal: both });
+      if (!res.ok) return null;
+      const type = res.headers.get('content-type') ?? '';
+      if (!type.startsWith('image/')) return null;
+      const len = Number(res.headers.get('content-length') ?? 0);
+      if (len > limit) return null;
+      const bytes = await readCapped(res, limit);
+      return bytes ? { bytes, contentType: type } : null;
+    } catch {
+      return null; // network error, timeout or budget exhausted: keep the image remote
+    }
   };
 }
 

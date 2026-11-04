@@ -189,12 +189,85 @@ describe('asset fetcher (SSRF guard)', () => {
   it('never fetches disallowed hosts and rejects non-images', async () => {
     const f = vi.fn(async () => new Response('x', { headers: { 'content-type': 'text/html' } }));
     const fetchAsset = blobAssetFetcher(f as unknown as typeof fetch);
-    expect(await fetchAsset('https://evil.com/a.png')).toBeNull();
+    expect(await fetchAsset('https://evil.com/a.png', opts())).toBeNull();
     expect(f).not.toHaveBeenCalled();
-    expect(await fetchAsset('https://a.public.blob.vercel-storage.com/a.png')).toBeNull();
+    expect(await fetchAsset('https://a.public.blob.vercel-storage.com/a.png', opts())).toBeNull();
     expect(f).toHaveBeenCalledWith(
       'https://a.public.blob.vercel-storage.com/a.png',
       expect.objectContaining({ redirect: 'error' }),
     );
   });
+
+  const URL_OK = 'https://a.public.blob.vercel-storage.com/a.png';
+
+  it('rejects an oversized body without content-length while streaming', async () => {
+    let pulled = 0;
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(c) {
+        pulled++;
+        c.enqueue(new Uint8Array(1024 * 1024)); // endless 1 MB chunks
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const f = async () => new Response(body, { headers: { 'content-type': 'image/png' } });
+    const fetchAsset = blobAssetFetcher(f as unknown as typeof fetch);
+    expect(await fetchAsset(URL_OK, opts(5 * 1024 * 1024))).toBeNull();
+    expect(cancelled).toBe(true);
+    expect(pulled).toBeLessThan(10); // stopped early, not after reading everything
+  });
+
+  it('returns null on timeout and on non-OK responses', async () => {
+    const hang = (_url: string, init?: RequestInit) =>
+      new Promise<Response>((_res, rej) =>
+        init?.signal?.addEventListener('abort', () =>
+          rej(new DOMException('aborted', 'AbortError')),
+        ),
+      );
+    const slow = blobAssetFetcher(hang as unknown as typeof fetch, { timeoutMs: 30 });
+    expect(await slow(URL_OK, opts())).toBeNull();
+    const notOk = blobAssetFetcher(
+      (async () =>
+        new Response('nope', {
+          status: 404,
+          headers: { 'content-type': 'image/png' },
+        })) as unknown as typeof fetch,
+    );
+    expect(await notOk(URL_OK, opts())).toBeNull();
+  });
+
+  it('respects the overall budget signal and remaining bytes', async () => {
+    const f = vi.fn(
+      async () => new Response(new Uint8Array(100), { headers: { 'content-type': 'image/png' } }),
+    );
+    const fetchAsset = blobAssetFetcher(f as unknown as typeof fetch);
+    const ac = new AbortController();
+    ac.abort();
+    expect(await fetchAsset(URL_OK, { signal: ac.signal, maxBytes: 1e6 })).toBeNull();
+    expect(f).not.toHaveBeenCalled();
+    expect(await fetchAsset(URL_OK, opts(50))).toBeNull(); // 100-byte body over the 50 left
+    expect((await fetchAsset(URL_OK, opts(200)))?.bytes.byteLength).toBe(100);
+  });
+
+  it('restricts to configured hosts when EXPORT_ASSET_HOSTS is set', () => {
+    expect(isBundlableAssetUrl(URL_OK, ['ours.public.blob.vercel-storage.com'])).toBe(false);
+    expect(
+      isBundlableAssetUrl('https://ours.public.blob.vercel-storage.com/x.png', [
+        'ours.public.blob.vercel-storage.com',
+      ]),
+    ).toBe(true);
+    vi.stubEnv('EXPORT_ASSET_HOSTS', 'ours.public.blob.vercel-storage.com');
+    try {
+      expect(isBundlableAssetUrl(URL_OK)).toBe(false);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    expect(isBundlableAssetUrl(URL_OK)).toBe(true);
+  });
 });
+
+function opts(maxBytes = 10 * 1024 * 1024) {
+  return { signal: new AbortController().signal, maxBytes };
+}

@@ -10,7 +10,13 @@ export interface FetchedAsset {
   contentType: string;
 }
 /** Return the asset bytes, or null to leave the source as-is (remote reference). */
-export type AssetFetcher = (src: string) => Promise<FetchedAsset | null>;
+export interface AssetFetchOptions {
+  /** Aborted when the export's overall time budget runs out. */
+  signal: AbortSignal;
+  /** Bytes this asset may use (the remaining total budget); larger bodies must be rejected. */
+  maxBytes: number;
+}
+export type AssetFetcher = (src: string, opts: AssetFetchOptions) => Promise<FetchedAsset | null>;
 
 const EXT: Record<string, string> = {
   'image/png': 'png',

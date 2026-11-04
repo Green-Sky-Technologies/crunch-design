@@ -1,6 +1,6 @@
 import { applyOps, sampleLandingDoc, starterDesignSystem, type DesignDoc } from '@crunch/doc-model';
 import JSZip from 'jszip';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { collectImageSources, rewriteImageSources } from './assets';
 import { ExportError, exportHtml, slugify, uniqueSlugs } from './html';
 import { buildExportZip } from './zip';
@@ -107,6 +107,75 @@ describe('buildExportZip', () => {
     expect(r.warnings.join(' ')).toMatch(/stay remote/);
     const zip = await JSZip.loadAsync(r.zip);
     expect(await zip.file('README.txt')!.async('string')).toContain(IMG);
+  });
+
+  it('caps the number of fetched images', async () => {
+    const many = applyOps(
+      sampleLandingDoc(),
+      Array.from({ length: 5 }, (_, i) => ({
+        op: 'insertSubtree' as const,
+        parentId: 'n_hero000001',
+        index: 0,
+        nodes: [
+          {
+            id: `n_imgmany00${i}`,
+            type: 'image' as const,
+            parentId: 'n_hero000001',
+            children: [],
+            positioning: 'flow' as const,
+            style: {},
+            props: { src: `https://abc.public.blob.vercel-storage.com/${i}.png`, alt: '' },
+          },
+        ],
+      })),
+    ).doc;
+    const fetchAsset = vi.fn(async () => ({
+      bytes: new Uint8Array([1]),
+      contentType: 'image/png',
+    }));
+    const r = await buildExportZip(many, ds, { fetchAsset, maxAssets: 2 });
+    expect(fetchAsset).toHaveBeenCalledTimes(2);
+    expect(r.files.filter((f) => f.startsWith('assets/'))).toHaveLength(1); // same bytes, same hash
+    expect(r.warnings.join(' ')).toMatch(/3 image\(s\)/);
+  });
+
+  it('enforces the total byte budget before fetching and passes the remaining budget', async () => {
+    const two = applyOps(docWithImage(), [
+      {
+        op: 'insertSubtree',
+        parentId: 'n_hero000001',
+        index: 0,
+        nodes: [
+          {
+            id: 'n_img0000002',
+            type: 'image',
+            parentId: 'n_hero000001',
+            children: [],
+            positioning: 'flow',
+            style: {},
+            props: { src: `${IMG}?2`, alt: '' },
+          },
+        ],
+      },
+    ]).doc;
+    const seen: number[] = [];
+    const fetchAsset = vi.fn(async (_src: string, o: { maxBytes: number }) => {
+      seen.push(o.maxBytes);
+      return { bytes: new Uint8Array(10), contentType: 'image/png' };
+    });
+    await buildExportZip(two, ds, { fetchAsset, maxAssetBytes: 10 });
+    expect(seen).toEqual([10]); // the budget was used up, so the second image isn't fetched
+  });
+
+  it('stops fetching when the overall time budget runs out', async () => {
+    const fetchAsset = vi.fn(
+      (_src: string, o: { signal: AbortSignal }) =>
+        new Promise<null>((resolve) => o.signal.addEventListener('abort', () => resolve(null))),
+    );
+    const started = Date.now();
+    const r = await buildExportZip(docWithImage(), ds, { fetchAsset, assetTimeBudgetMs: 50 });
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(r.files.some((f) => f.startsWith('assets/'))).toBe(false);
   });
 
   it('adds extra files but rejects path traversal', async () => {
