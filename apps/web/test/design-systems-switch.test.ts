@@ -3,7 +3,9 @@ import { ForbiddenError } from '@crunch/authz';
 import { sampleLandingDoc, starterDesignSystem } from '@crunch/doc-model';
 import { diffSystemsForDoc } from '@/server/services/design-systems/diff';
 import {
+  archiveDesignSystem,
   createDesignSystem,
+  getDesignSystem,
   listDesignSystems,
   publishDesignSystem,
   setDesignSystemToken,
@@ -130,6 +132,21 @@ describe('switching a project between systems', () => {
     await expect(
       switchProjectDesignSystem(db, editor, p.id, { designSystemId: brand.id, version: 5 }),
     ).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('archive and switch never leave a project on an archived system', async () => {
+    const editor = await makeActor(db, 'editor');
+    const p = await createProject(db, editor, { name: 'P' });
+    for (let i = 0; i < 5; i++) {
+      const s = await createDesignSystem(db, editor, { name: `S${i}` });
+      await Promise.allSettled([
+        archiveDesignSystem(db, editor, s.id),
+        switchProjectDesignSystem(db, editor, p.id, { designSystemId: s.id }),
+      ]);
+      const project = await getProject(db, editor, p.id);
+      if (project.designSystemId === s.id)
+        expect((await getDesignSystem(db, editor, s.id)).system.id).toBe(s.id); // not archived
+    }
   });
 
   it('enforces permissions and workspace scoping', async () => {

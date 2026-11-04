@@ -337,6 +337,60 @@ describe('design systems', () => {
     await expect(getDesignSystem(db, editor, copy.id)).rejects.toBeInstanceOf(NotFoundError);
   });
 
+  it('concurrent set-default calls serialize and leave exactly one default', async () => {
+    const editor = await makeActor(db, 'editor');
+    const created = await Promise.all(
+      [1, 2, 3, 4].map((i) => createDesignSystem(db, editor, { name: `S${i}` })),
+    );
+    for (let round = 0; round < 3; round++) {
+      await Promise.all(created.map((s) => setDefaultDesignSystem(db, editor, s.id)));
+      expect((await listDesignSystems(db, editor)).filter((s) => s.isDefault)).toHaveLength(1);
+    }
+  });
+
+  it('discard and publish under concurrency leave the draft equal to a published version', async () => {
+    const editor = await makeActor(db, 'editor');
+    const ds = await defaultSystem(editor);
+    await setDesignSystemToken(db, editor, ds.id, 'color.primary', {
+      type: 'color',
+      value: '#010101',
+    });
+    await Promise.allSettled([
+      publishDesignSystem(db, editor, ds.id),
+      discardDesignSystemDraft(db, editor, ds.id),
+    ]);
+    const detail = await getDesignSystem(db, editor, ds.id);
+    const latest = await getDesignSystemVersionSpec(
+      db,
+      editor,
+      ds.id,
+      detail.system.latestVersion!,
+    );
+    expect(detail.draft).toEqual(latest);
+  });
+
+  it('copying a specific version requires an integer version', async () => {
+    const editor = await makeActor(db, 'editor');
+    const ds = await defaultSystem(editor);
+    await expect(
+      createDesignSystem(db, editor, {
+        name: 'Copy',
+        source: { kind: 'copy', designSystemId: ds.id, version: '1' as unknown as number },
+      }),
+    ).rejects.toBeInstanceOf(ValidationError);
+    await expect(
+      createDesignSystem(db, editor, {
+        name: 'Copy',
+        source: { kind: 'copy', designSystemId: ds.id, version: 1.5 },
+      }),
+    ).rejects.toBeInstanceOf(ValidationError);
+    const copy = await createDesignSystem(db, editor, {
+      name: 'Copy',
+      source: { kind: 'copy', designSystemId: ds.id, version: 1 },
+    });
+    expect(copy.latestVersion).toBe(1);
+  });
+
   it('viewers read but cannot edit; other workspaces see nothing', async () => {
     const editor = await makeActor(db, 'editor');
     const viewer = await makeActor(db, 'viewer', editor.workspace);

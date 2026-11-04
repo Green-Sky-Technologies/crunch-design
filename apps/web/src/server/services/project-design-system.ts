@@ -343,10 +343,23 @@ export async function switchProjectDesignSystem(
   assertCan(actor.role, 'design_system:read');
   const project = await getProject(db, actor, projectId);
   const next = await resolveTarget(db, actor, target);
-  const [updated] = await db
-    .update(projects)
-    .set({ designSystemId: next.id, designSystemVersionId: next.versionId })
-    .where(and(eq(projects.id, project.id), eq(projects.workspaceId, actor.workspace.id)))
-    .returning();
-  return resolveProjectDesignSystem(db, actor, updated!);
+  const updated = await db.transaction(async (tx) => {
+    // Share-lock the target and re-check it isn't archived: archiveDesignSystem takes an update
+    // lock on the same row and counts its projects, so the two can't interleave and leave this
+    // project on an archived system.
+    const [ds] = await tx
+      .select({ archivedAt: designSystems.archivedAt })
+      .from(designSystems)
+      .where(and(eq(designSystems.id, next.id), eq(designSystems.workspaceId, actor.workspace.id)))
+      .limit(1)
+      .for('share');
+    if (!ds || ds.archivedAt) throw new NotFoundError('Design system not found');
+    const [row] = await tx
+      .update(projects)
+      .set({ designSystemId: next.id, designSystemVersionId: next.versionId })
+      .where(and(eq(projects.id, project.id), eq(projects.workspaceId, actor.workspace.id)))
+      .returning();
+    return row!;
+  });
+  return resolveProjectDesignSystem(db, actor, updated);
 }

@@ -42,6 +42,7 @@ type Conn = Db | Tx;
 
 const nameSchema = z.string().trim().min(1, 'Name is required').max(80, 'Name is too long');
 const descriptionSchema = z.string().trim().max(1000, 'Description is too long');
+const versionSchema = z.number().int().positive('Invalid version');
 const notesSchema = z.string().trim().max(2000, 'Notes are too long');
 
 export interface DesignSystemSummary {
@@ -368,7 +369,8 @@ export async function createDesignSystem(
     const src = await loadRow(db, actor, source.designSystemId);
     if (source.version === undefined) spec = draftSpecOf(src);
     else {
-      const v = await versionSpec(db, src.id, source.version);
+      const version = parseField(versionSchema, source.version, 'version');
+      const v = await versionSpec(db, src.id, version);
       if (!v) throw new NotFoundError('Version not found');
       spec = v;
     }
@@ -417,7 +419,15 @@ export async function updateDesignSystemDetails(
 export async function setDefaultDesignSystem(db: Db, actor: Actor, id: string): Promise<void> {
   assertCan(actor.role, 'design_system:edit');
   await db.transaction(async (tx) => {
-    await loadRow(tx, actor, id, { lock: true });
+    // Lock every system in the workspace (in id order) so concurrent set-default calls serialize
+    // instead of colliding on the one-default unique index.
+    await tx
+      .select({ id: designSystems.id })
+      .from(designSystems)
+      .where(eq(designSystems.workspaceId, actor.workspace.id))
+      .orderBy(asc(designSystems.id))
+      .for('update');
+    await loadRow(tx, actor, id);
     await tx
       .update(designSystems)
       .set({ isDefault: false, updatedAt: KEEP_UPDATED_AT })
@@ -468,7 +478,7 @@ async function writeDraft(
   db: Db,
   actor: Actor,
   id: string,
-  mutate: (draft: DesignSystemSpec) => unknown,
+  mutate: (draft: DesignSystemSpec, row: DesignSystem, tx: Tx) => unknown,
   baseRevision?: string,
 ): Promise<SaveDraftResult> {
   assertCan(actor.role, 'design_system:edit');
@@ -480,7 +490,7 @@ async function writeDraft(
         { revision: ['stale'] },
       );
     }
-    const spec = validateSpecOrThrow(mutate(structuredClone(draftSpecOf(row))));
+    const spec = validateSpecOrThrow(await mutate(structuredClone(draftSpecOf(row)), row, tx));
     const [updated] = await tx
       .update(designSystems)
       .set({ draft: spec, updatedBy: actor.userId, updatedAt: new Date() })
@@ -551,11 +561,12 @@ export async function discardDesignSystemDraft(
   actor: Actor,
   id: string,
 ): Promise<SaveDraftResult> {
-  assertCan(actor.role, 'design_system:edit');
-  const row = await loadRow(db, actor, id);
-  if (row.latestVersion === null) throw new ValidationError('Nothing has been published yet');
-  const latest = await versionSpec(db, row.id, row.latestVersion);
-  return writeDraft(db, actor, id, () => latest);
+  // Read latestVersion under the same row lock as the write, so a concurrent publish can't make
+  // us reset the draft to an older version.
+  return writeDraft(db, actor, id, async (_draft, row, tx) => {
+    if (row.latestVersion === null) throw new ValidationError('Nothing has been published yet');
+    return versionSpec(tx, row.id, row.latestVersion);
+  });
 }
 
 // ---------------------------------------------------------------------------------------------
