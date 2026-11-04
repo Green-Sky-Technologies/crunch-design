@@ -171,6 +171,12 @@ on behalf of the lock holder.
 
 ## 5. Data Model (sketch)
 
+> **Implemented in Epic 2.** The authoritative definitions are now code: `packages/doc-model`
+> (DesignDoc, style allowlist, tokens, design-system spec, ops), `packages/db/src/schema/*`
+> (tables) and `packages/contracts` (cross-stream interfaces). Where this sketch and the code
+> differ, the code wins. Notable differences: the design system is linked from the project
+> row, not the doc; docs carry `tokenOverrides`; and there are 15 op types (see `ops/types.ts`).
+
 ```ts
 // packages/doc-model
 type NodeId = string;              // stable nanoid; also used as the Figma plugin-data key
