@@ -4,7 +4,8 @@
  * The plugin collects every node under a previously pushed frame that carries our plugin data,
  * and reconcile() decides which to update, which to create, and which to remove, so a second push
  * only creates/removes the difference. Nodes without our plugin data (added by hand in Figma)
- * are never touched. Copies of managed nodes (Figma duplicates plugin data) are detached instead
+ * are never touched, even when they sit inside a removed node (see planRemoval, which moves
+ * them out first). Copies of managed nodes (Figma duplicates plugin data) are detached instead
  * of deleted, so user work is never lost.
  */
 import type { NodeKind, NodeSpec } from './plan';
@@ -74,6 +75,52 @@ export function reconcile(
   }
   for (const p of planned) if (!result.update.has(p.cdId)) result.create.add(p.cdId);
   return result;
+}
+
+/** The current Figma tree under a pushed root, as seen just before stale nodes are removed. */
+export interface LiveNode {
+  id: string;
+  /** Carries our plugin data (cd:id). */
+  managed: boolean;
+  /** Don't look inside (instances, imported SVGs): their children aren't user layers. */
+  opaque?: boolean;
+  children: LiveNode[];
+}
+
+export interface RemovalPlan {
+  /** Unmanaged layers to move out before their managed ancestor is deleted. */
+  rescue: { nodeId: string; toParentId: string }[];
+  /** Topmost nodes to delete (deleting one deletes its subtree). */
+  removeRoots: string[];
+}
+
+/**
+ * Figma's `remove()` deletes a whole subtree, so removing a stale managed node would also delete
+ * layers the user added inside it. For each topmost node being removed, move every topmost
+ * descendant that isn't itself being removed (hand-made layers, detached copies) to the nearest
+ * kept ancestor, then delete. Pure, so the plugin's removal path is testable.
+ */
+export function planRemoval(root: LiveNode, remove: ReadonlySet<string>): RemovalPlan {
+  const plan: RemovalPlan = { rescue: [], removeRoots: [] };
+  const collect = (n: LiveNode, target: string) => {
+    if (n.opaque) return;
+    for (const c of n.children) {
+      if (remove.has(c.id)) collect(c, target);
+      else plan.rescue.push({ nodeId: c.id, toParentId: target });
+    }
+  };
+  const visit = (n: LiveNode, keptAncestor: string) => {
+    if (remove.has(n.id)) {
+      plan.removeRoots.push(n.id);
+      collect(n, keptAncestor);
+      return;
+    }
+    if (n.opaque) return;
+    for (const c of n.children) visit(c, n.id);
+  };
+  if (remove.has(root.id)) throw new Error('The pushed root itself is never removed');
+  visit(root, root.id);
+  return plan;
 }
 
 /** FNV-1a 32-bit over a stable JSON serialization. */

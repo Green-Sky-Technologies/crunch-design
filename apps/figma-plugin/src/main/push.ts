@@ -30,6 +30,7 @@ import {
 } from '@crunch/figma-convert/plugin';
 import { collector, type Note } from './note';
 import { dataUrlBytes, effect, gradientPaint, solidPaint } from './paints';
+import { removeKeepingUserLayers, type RemovableNode } from './removal';
 import { upsertVariables } from './variables';
 
 export interface PushOutcome {
@@ -490,20 +491,29 @@ class Applier {
       this.created++;
     }
     const node = await this.place(root, host, hostIndex, byId, r, reuse);
-    for (const id of r.remove) {
-      const n = byId.get(id);
-      if (n && !n.removed && n !== node) {
-        n.remove();
-        this.removed++;
-      }
-    }
+    // Detach copies first, so they count as user layers and are kept by the removal below.
     for (const id of r.detach) {
       const n = byId.get(id);
       if (n && !n.removed) {
         n.setPluginData(PLUGIN_DATA_KEY, '');
         n.setPluginData(PLUGIN_HASH_KEY, '');
+        n.setPluginData(PLUGIN_KIND_KEY, '');
       }
     }
+    // Removing a stale managed node must not delete layers the user added inside it.
+    const roots = [node, ...(rootNode && rootNode !== node && !rootNode.removed ? [rootNode] : [])];
+    const res = removeKeepingUserLayers(
+      host as unknown as RemovableNode,
+      roots as unknown as RemovableNode[],
+      r.remove.filter((id) => id !== node.id),
+    );
+    this.removed += res.removed;
+    if (res.rescued)
+      this.note(
+        'info',
+        `Kept ${res.rescued} hand-made layer(s) that were inside removed layers; moved them to the parent`,
+        'layers',
+      );
     return node;
   }
 
