@@ -31,6 +31,7 @@ import { providerModelId, type Provider } from '@crunch/providers';
 import { z } from 'zod';
 import { JobTokenError, tokenFromHeaders, verifyJobToken } from './agent/job-tokens';
 import { getModelSettings } from './agent/model-settings';
+import { HEARTBEAT_THROTTLE_MS, touchJobHeartbeat } from './jobs';
 import { loadWorkspaceClient } from './credentials';
 import { NotFoundError, ValidationError } from './types';
 
@@ -349,7 +350,20 @@ export async function handleMessagesProxy(
     const ctx = ctxForJob(job);
     const prepared = await prepareCall(db, ctx, params.model, deps);
     const headers = { 'anthropic-beta': req.headers.get('anthropic-beta') ?? '' };
-    const opts = { signal: req.signal, headers: headers['anthropic-beta'] ? headers : undefined };
+    // Model calls count as job activity, throttled, so a long turn doesn't look like a dead sandbox.
+    let lastBeat = 0;
+    const beat = () => {
+      const t = Date.now();
+      if (t - lastBeat < HEARTBEAT_THROTTLE_MS) return;
+      lastBeat = t;
+      void touchJobHeartbeat(db, job.id).catch(() => {});
+    };
+    beat();
+    const opts = {
+      signal: req.signal,
+      headers: headers['anthropic-beta'] ? headers : undefined,
+      onEvent: beat,
+    };
 
     if (!wantsStream) {
       const message = await metered(db, ctx, prepared, params, opts, deps);
@@ -374,6 +388,7 @@ export async function handleMessagesProxy(
       {
         ...opts,
         onEvent: (e) => {
+          beat();
           queue.push(e);
           notify();
         },

@@ -145,7 +145,7 @@ describe('sandbox entrypoint', () => {
         },
       },
     });
-    expect(reports.map((r) => r.type)).toEqual(['status', 'log', 'tool', 'result']);
+    expect(reports.map((r) => r.type)).toEqual(['progress', 'log', 'tool', 'result']);
     expect(reports.at(-1)!.data).toEqual({ summary: 'Created 1 frame' });
   });
 
@@ -163,7 +163,7 @@ describe('sandbox entrypoint', () => {
     expect(
       await main({ query: failing, fetch: ok, env, readFile: async () => JSON.stringify(spec) }),
     ).toBe(1);
-    expect(reports).toEqual(['status', 'error']);
+    expect(reports).toEqual(['progress', 'error']);
 
     const revoked = vi.fn(async () => new Response('{}', { status: 401 }));
     expect(

@@ -24,8 +24,10 @@ import {
   eq,
   gt,
   inArray,
+  isNull,
   jobEvents,
   jobs,
+  jobTokens,
   lt,
   members,
   sql,
@@ -40,8 +42,12 @@ import { NotFoundError, ValidationError, type Actor } from './types';
 
 export const DEFAULT_JOB_TIMEOUT_SECONDS = 30 * 60;
 export const DEFAULT_MAX_ATTEMPTS = 2;
-/** A running job that hasn't reported for this long is presumed orphaned. */
+/** A running job that hasn't shown activity for this long is presumed orphaned. */
 export const HEARTBEAT_TIMEOUT_MS = 5 * 60 * 1000;
+/** How long provisioning (sandbox create + spawn) may take before the reaper steps in. */
+export const PROVISION_TIMEOUT_MS = 10 * 60 * 1000;
+/** Heartbeats from the proxy and tool calls are written at most this often. */
+export const HEARTBEAT_THROTTLE_MS = 30 * 1000;
 
 export interface JobDeps {
   runner: JobRunner;
@@ -88,6 +94,24 @@ export const toJobView = (j: JobRow): JobView => ({
 // Events and transitions
 // ---------------------------------------------------------------------------------------------
 
+type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
+
+async function appendEventTx(
+  tx: Tx | Db,
+  jobId: string,
+  type: JobEventType,
+  data: Record<string, unknown>,
+): Promise<number> {
+  const [row] = await tx
+    .update(jobs)
+    .set({ lastEventSeq: sql`${jobs.lastEventSeq} + 1` })
+    .where(eq(jobs.id, jobId))
+    .returning({ seq: jobs.lastEventSeq });
+  if (!row) throw new NotFoundError('Job not found');
+  await tx.insert(jobEvents).values({ jobId, seq: row.seq, type, data });
+  return row.seq;
+}
+
 /** Append an event with the next seq for the job (atomic per job). */
 export async function appendJobEvent(
   db: Db,
@@ -95,49 +119,99 @@ export async function appendJobEvent(
   type: JobEventType,
   data: Record<string, unknown> = {},
 ): Promise<number> {
-  return db.transaction(async (tx) => {
-    const [row] = await tx
-      .update(jobs)
-      .set({ lastEventSeq: sql`${jobs.lastEventSeq} + 1` })
-      .where(eq(jobs.id, jobId))
-      .returning({ seq: jobs.lastEventSeq });
-    if (!row) throw new NotFoundError('Job not found');
-    await tx.insert(jobEvents).values({ jobId, seq: row.seq, type, data });
-    return row.seq;
-  });
+  return db.transaction((tx) => appendEventTx(tx, jobId, type, data));
 }
 
-/** Conditional status change: only from one of `from`. Returns the updated row, or null. */
+/**
+ * Record activity for a live job, at most every HEARTBEAT_THROTTLE_MS. Called from sandbox
+ * reports, the LLM proxy (during long streams) and MCP tool calls, so a long model turn doesn't
+ * look like a dead sandbox to the reaper.
+ */
+export async function touchJobHeartbeat(db: Db, jobId: string, now = new Date()): Promise<void> {
+  await db
+    .update(jobs)
+    .set({ heartbeatAt: now })
+    .where(
+      and(
+        eq(jobs.id, jobId),
+        eq(jobs.status, 'running'),
+        sql`(${jobs.heartbeatAt} is null or ${jobs.heartbeatAt} < ${new Date(now.getTime() - HEARTBEAT_THROTTLE_MS)})`,
+      ),
+    );
+}
+
+interface TransitionExtras {
+  /** Events written before the status event, in the same transaction. */
+  events?: { type: JobEventType; data: Record<string, unknown> }[];
+  /** Status event payload. */
+  eventData?: Record<string, unknown>;
+  /** Final chat text for the job's message (terminal transitions). */
+  messageText?: string;
+}
+
+/**
+ * Conditional status change: only from one of `from`. The status row, its events, token
+ * revocation and the chat message are written in one transaction, so an SSE reader never sees a
+ * terminal status without its final events, and `done` can't precede them.
+ */
 async function transition(
   db: Db,
   jobId: string,
   from: JobStatus[],
   to: JobStatus,
   patch: Partial<typeof jobs.$inferInsert> = {},
-  eventData: Record<string, unknown> = {},
+  extras: TransitionExtras = {},
 ): Promise<JobRow | null> {
-  const [row] = await db
-    .update(jobs)
-    .set({ status: to, ...patch })
-    .where(and(eq(jobs.id, jobId), inArray(jobs.status, from)))
-    .returning();
-  if (!row) return null;
-  await appendJobEvent(db, jobId, 'status', { status: to, ...eventData });
-  if (TERMINAL_STATUSES.has(to)) await onTerminal(db, row);
-  return row;
+  return db.transaction(async (tx) => {
+    const [updated] = await tx
+      .update(jobs)
+      .set({ status: to, ...patch })
+      .where(and(eq(jobs.id, jobId), inArray(jobs.status, from)))
+      .returning();
+    if (!updated) return null;
+    for (const e of extras.events ?? []) await appendEventTx(tx, jobId, e.type, e.data);
+    await appendEventTx(tx, jobId, 'status', { status: to, ...extras.eventData });
+    if (TERMINAL_STATUSES.has(to)) {
+      await tx
+        .update(jobTokens)
+        .set({ revokedAt: new Date() })
+        .where(and(eq(jobTokens.jobId, jobId), isNull(jobTokens.revokedAt)));
+      const status = to === 'succeeded' ? 'complete' : to === 'cancelled' ? 'cancelled' : 'error';
+      await tx
+        .update(agentMessages)
+        .set({
+          status,
+          error: to === 'failed' ? (updated.error ?? 'Job failed') : null,
+          ...(extras.messageText !== undefined
+            ? {
+                content: {
+                  v: 1,
+                  turns: [
+                    { role: 'assistant', content: [{ type: 'text', text: extras.messageText }] },
+                  ],
+                },
+              }
+            : {}),
+        })
+        .where(
+          and(
+            eq(agentMessages.jobId, jobId),
+            inArray(agentMessages.status, ['pending', 'streaming']),
+          ),
+        );
+    }
+    const [row] = await tx.select().from(jobs).where(eq(jobs.id, jobId));
+    return row ?? updated;
+  });
 }
 
-/** Revoke the job's tokens and settle its chat message. */
-async function onTerminal(db: Db, job: JobRow) {
-  await revokeJobTokens(db, job.id);
-  const status =
-    job.status === 'succeeded' ? 'complete' : job.status === 'cancelled' ? 'cancelled' : 'error';
-  await db
-    .update(agentMessages)
-    .set({ status, error: job.status === 'failed' ? (job.error ?? 'Job failed') : null })
-    .where(
-      and(eq(agentMessages.jobId, job.id), inArray(agentMessages.status, ['pending', 'streaming'])),
-    );
+/** Whether a job's agent has already committed document changes (a retry would duplicate them). */
+export async function jobHasCommitted(db: Db, jobId: string): Promise<boolean> {
+  const rows = await db
+    .select({ n: sql<number>`coalesce(cardinality(${agentMessages.txnIds}), 0)::int` })
+    .from(agentMessages)
+    .where(eq(agentMessages.jobId, jobId));
+  return rows.some((r) => r.n > 0);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -197,8 +271,10 @@ export async function createJob(db: Db, actor: Actor, raw: unknown): Promise<Job
 /** Provision a sandbox for a queued job. Safe to call twice (only one caller wins). */
 export async function startJob(db: Db, jobId: string, deps: JobDeps): Promise<JobRow | null> {
   const now = deps.now?.() ?? new Date();
+  // heartbeatAt marks when provisioning began; the reaper leaves it alone until PROVISION_TIMEOUT_MS.
   const claimed = await transition(db, jobId, ['queued'], 'provisioning', {
     attempts: sql`${jobs.attempts} + 1` as unknown as number,
+    heartbeatAt: now,
   });
   if (!claimed) return null;
   try {
@@ -261,10 +337,8 @@ export async function cancelJob(
     jobId,
     ['queued', 'provisioning', 'running'],
     'cancelled',
-    {
-      finishedAt: now,
-    },
-    { by: actor.userId },
+    { finishedAt: now },
+    { eventData: { by: actor.userId } },
   );
   if (job.sandboxId) await deps.runner.cancel(jobId, job.sandboxId).catch(() => {});
   return toJobView(row ?? (await loadJob(db, actor, jobId)));
@@ -287,7 +361,8 @@ export function jobSummaryText(result: { summary: string; frames: unknown[] }): 
 
 const reportBody = z
   .object({
-    type: z.enum(['status', 'progress', 'log', 'tool', 'result', 'error']),
+    // Only the server sets job status; sandboxes report progress, logs, tools, result or error.
+    type: z.enum(['progress', 'log', 'tool', 'result', 'error']),
     data: z.record(z.string(), z.unknown()).default({}),
   })
   .strict();
@@ -321,36 +396,30 @@ export async function reportJobEvent(
       .from(jobEvents)
       .where(and(eq(jobEvents.jobId, jobId), eq(jobEvents.type, 'frame')))
       .orderBy(asc(jobEvents.seq));
-    const seq = await appendJobEvent(db, jobId, 'result', clipped);
     const result = { summary: String(clipped.summary ?? ''), frames: frames.map((f) => f.data) };
-    const row = await transition(db, jobId, ['running', 'provisioning'], 'succeeded', {
-      result,
-      finishedAt: now,
-    });
+    // Only recorded if the job is still running: a result that races a cancel is dropped.
+    const row = await transition(
+      db,
+      jobId,
+      ['running'],
+      'succeeded',
+      { result, finishedAt: now },
+      { events: [{ type: 'result', data: clipped }], messageText: jobSummaryText(result) },
+    );
     if (!row) throw new JobGoneError('Job is no longer running');
-    await db
-      .update(agentMessages)
-      .set({
-        content: {
-          v: 1,
-          turns: [
-            {
-              role: 'assistant',
-              content: [{ type: 'text', text: jobSummaryText(result) }],
-            },
-          ],
-        },
-      })
-      .where(eq(agentMessages.jobId, jobId));
-    return { seq };
+    return { seq: row.lastEventSeq };
   }
   if (type === 'error') {
-    const seq = await appendJobEvent(db, jobId, 'error', clipped);
-    await transition(db, jobId, ['running', 'provisioning'], 'failed', {
-      error: String(clipped.message ?? 'Job failed').slice(0, 500),
-      finishedAt: now,
-    });
-    return { seq };
+    const row = await transition(
+      db,
+      jobId,
+      ['running'],
+      'failed',
+      { error: String(clipped.message ?? 'Job failed').slice(0, 500), finishedAt: now },
+      { events: [{ type: 'error', data: clipped }] },
+    );
+    if (!row) throw new JobGoneError('Job is no longer running');
+    return { seq: row.lastEventSeq };
   }
   return { seq: await appendJobEvent(db, jobId, type, clipped) };
 }
@@ -378,33 +447,54 @@ export async function reapJobs(db: Db, deps: JobDeps): Promise<ReapSummary> {
     .where(inArray(jobs.status, ['provisioning', 'running']))
     .limit(500);
   for (const job of active) {
-    const started = job.startedAt ?? job.updatedAt;
-    if (started.getTime() + job.timeoutSeconds * 1000 < now.getTime()) {
-      if (job.sandboxId) await deps.runner.cancel(job.id, job.sandboxId).catch(() => {});
-      await transition(db, job.id, ['provisioning', 'running'], 'failed', {
-        error: `Timed out after ${job.timeoutSeconds}s`,
-        finishedAt: now,
-      });
-      out.timedOut.push(job.id);
-      continue;
-    }
-    const stale = (job.heartbeatAt ?? job.updatedAt).getTime() + hbTimeout < now.getTime();
-    const alive = job.sandboxId ? await deps.runner.isAlive(job.sandboxId) : false;
-    if (!stale && alive) continue;
-    if (alive && job.sandboxId) await deps.runner.cancel(job.id, job.sandboxId).catch(() => {});
-    if (stale || !alive) {
-      if (job.attempts < max) {
-        await revokeJobTokens(db, job.id);
-        await appendJobEvent(db, job.id, 'log', { text: 'Sandbox lost; retrying' });
-        await transition(db, job.id, ['provisioning', 'running'], 'queued', { sandboxId: null });
-        out.retried.push(job.id);
-      } else {
-        await transition(db, job.id, ['provisioning', 'running'], 'failed', {
-          error: 'The job sandbox stopped unexpectedly',
+    if (job.status === 'provisioning') {
+      // No sandbox id yet: leave it alone until its provisioning deadline passes.
+      const since = (job.heartbeatAt ?? job.updatedAt).getTime();
+      if (since + PROVISION_TIMEOUT_MS >= now.getTime()) continue;
+    } else {
+      const started = job.startedAt ?? job.updatedAt;
+      if (started.getTime() + job.timeoutSeconds * 1000 < now.getTime()) {
+        if (job.sandboxId) await deps.runner.cancel(job.id, job.sandboxId).catch(() => {});
+        await transition(db, job.id, ['running'], 'failed', {
+          error: `Timed out after ${job.timeoutSeconds}s`,
           finishedAt: now,
         });
-        out.orphaned.push(job.id);
+        out.timedOut.push(job.id);
+        continue;
       }
+      const stale = (job.heartbeatAt ?? job.updatedAt).getTime() + hbTimeout < now.getTime();
+      const alive = job.sandboxId ? await deps.runner.isAlive(job.sandboxId) : false;
+      if (!stale && alive) continue;
+      if (alive && job.sandboxId) await deps.runner.cancel(job.id, job.sandboxId).catch(() => {});
+    }
+    // Lost. Retry from scratch only if nothing was committed yet, so a retry can't duplicate
+    // frames (or the spend that produced them).
+    const committed = await jobHasCommitted(db, job.id);
+    if (job.attempts < max && !committed) {
+      const requeued = await transition(
+        db,
+        job.id,
+        [job.status],
+        'queued',
+        { sandboxId: null },
+        {
+          events: [{ type: 'log', data: { text: 'Sandbox lost; retrying' } }],
+        },
+      );
+      if (requeued) {
+        await revokeJobTokens(db, job.id);
+        out.retried.push(job.id);
+      }
+    } else {
+      const failed = await transition(db, job.id, [job.status], 'failed', {
+        error: committed
+          ? 'The job stopped after making changes, so it was not retried. Revert or start it again.'
+          : job.status === 'provisioning'
+            ? 'The job sandbox did not start in time'
+            : 'The job sandbox stopped unexpectedly',
+        finishedAt: now,
+      });
+      if (failed) out.orphaned.push(job.id);
     }
   }
 

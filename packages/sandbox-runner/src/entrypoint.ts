@@ -62,7 +62,7 @@ export async function main(deps) {
   const abort = new AbortController();
   let summary = '';
   try {
-    await report('status', { phase: 'agent_started' });
+    await report('progress', { phase: 'agent_started' });
     const q = query({
       prompt: spec.prompt,
       options: {

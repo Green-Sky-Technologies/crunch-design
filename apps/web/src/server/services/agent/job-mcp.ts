@@ -6,7 +6,7 @@
  */
 import { contractToolDefs, executeTool, type ToolHost } from '@crunch/agent';
 import { agentMessages, eq, type Db } from '@crunch/db';
-import { appendJobEvent, jobActor } from '../jobs';
+import { appendJobEvent, jobActor, touchJobHeartbeat } from '../jobs';
 import { JobTokenError, tokenFromHeaders, verifyJobToken } from './job-tokens';
 import { snapshotBeforeAgentEdit } from './snapshots';
 import { createDbToolHost } from './tool-host';
@@ -107,6 +107,7 @@ export async function handleJobMcp(db: Db, req: Request, jobId: string): Promise
           break;
         case 'tools/call': {
           const name = String(r.params?.name ?? '');
+          await touchJobHeartbeat(db, job.id);
           await appendJobEvent(db, job.id, 'tool', { name, phase: 'call' });
           const res = await executeTool(await getHost(), name, r.params?.arguments ?? {});
           result = { content: [{ type: 'text', text: res.content }], isError: res.isError };
