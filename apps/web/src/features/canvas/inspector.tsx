@@ -11,6 +11,8 @@ import {
   nodeLabel,
   propState,
   sharedValue,
+  sizingMode,
+  type SizingMode,
   tokensForProp,
   type TokenOption,
 } from '@crunch/canvas';
@@ -28,6 +30,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { useDocStore, useDocStoreApi, useEditor } from '../doc-store';
 import { useCanvas, useCanvasStoreApi } from './canvas-store';
 import { frameIndex } from './context';
+import { nodeElement } from './dom';
 import { positioningOps } from './drag';
 import { StyleField, type ApplyMeta } from './style-field';
 
@@ -187,6 +190,63 @@ function NodeMeta({ nodes, readOnly, bp }: { nodes: Node[]; readOnly: boolean; b
   );
 }
 
+/** Fixed / Fill / Hug per axis (Story 3.5). Fixed pins the current rendered size. */
+function SizingRow({ nodes, bp, readOnly }: { nodes: Node[]; bp: Breakpoint; readOnly: boolean }) {
+  const docStore = useDocStoreApi();
+  const n = nodes[0]!;
+  const set = (axis: 'width' | 'height', mode: SizingMode) => {
+    const s = docStore.getState();
+    const index = frameIndex(s.doc);
+    const ops = nodes.map((x) => {
+      let value: unknown = mode;
+      if (mode === 'fixed') {
+        const el = nodeElement(document, index.get(x.id) ?? '', x.id);
+        value = Math.max(
+          1,
+          Math.round(axis === 'width' ? (el?.offsetWidth ?? 100) : (el?.offsetHeight ?? 100)),
+        );
+      }
+      return { op: 'setStyle' as const, id: x.id, breakpoint: bp, prop: axis, value };
+    });
+    s.apply(ops, {
+      source: 'inspector',
+      label: `${axis === 'width' ? 'Width' : 'Height'}: ${mode}`,
+    });
+  };
+  return (
+    <div className="space-y-1 px-3 pb-2 text-xs">
+      {(['width', 'height'] as const).map((axis) => {
+        const mode = sizingMode(propState(n.style, axis, bp).value);
+        return (
+          <div key={axis} className="flex items-center gap-2">
+            <span className="w-12 text-muted">{axis === 'width' ? 'Width' : 'Height'}</span>
+            <div
+              role="radiogroup"
+              aria-label={`${axis} sizing`}
+              className="flex rounded border border-border"
+            >
+              {(['fixed', 'fill', 'hug'] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  role="radio"
+                  aria-checked={mode === m}
+                  disabled={readOnly}
+                  className={`px-2 py-0.5 capitalize ${mode === m ? 'bg-surface-2 font-medium' : ''}`}
+                  onClick={() => mode !== m && set(axis, m)}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
+            {mode === 'auto' && <span className="text-muted">auto</span>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function NodeInspector({ ids, frame }: { ids: string[]; frame: Frame | undefined }) {
   const { designSystem } = useEditor();
   const readOnly = useDocStore((s) => s.readOnly);
@@ -231,6 +291,7 @@ function NodeInspector({ ids, frame }: { ids: string[]; frame: Frame | undefined
     <div data-testid="inspector">
       <NodeMeta key={primary.id} nodes={nodes} readOnly={readOnly} bp={bp} />
       <BreakpointTabs bp={bp} frameBp={frameBp} />
+      <SizingRow nodes={nodes} bp={bp} readOnly={readOnly} />
       <div className="px-3 pb-1">
         <input
           aria-label="Filter properties"

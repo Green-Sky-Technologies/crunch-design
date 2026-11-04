@@ -151,7 +151,7 @@ export function SelectionOverlay() {
           </Box>
         );
       })}
-      {singleRect && singleNode && (
+      {singleRect && singleNode && gesture !== 'resize' && (
         <Box r={worldRectToScreen(camera, singleRect)}>
           <span style={{ ...tag, left: -2, top: -19 }}>{nodeLabel(singleNode)}</span>
           <span

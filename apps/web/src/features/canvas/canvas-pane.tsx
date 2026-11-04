@@ -15,6 +15,7 @@ import { ViewportCtx } from './context';
 import { FrameChrome } from './frame-chrome';
 import { LayersPanel } from './layers-panel';
 import { RegisteredOverlays } from './overlay-api';
+import { GuidesOverlay, ResizeHandles } from './resize-handles';
 import { useSelectionInput } from './selection-input';
 import { DropIndicator, SelectionOverlay } from './selection-overlay';
 import { isTypingEvent, startGesture } from './gesture';
@@ -233,6 +234,8 @@ export function CanvasPane() {
         >
           <SelectionOverlay />
           <DropIndicator />
+          <GuidesOverlay />
+          <ResizeHandles />
           <FrameChrome />
           <RegisteredOverlays />
         </div>

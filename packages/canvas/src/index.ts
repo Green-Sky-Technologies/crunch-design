@@ -9,3 +9,5 @@ export * from './minimap';
 export * from './tree';
 export * from './inspector';
 export * from './dnd';
+export * from './sizing';
+export * from './snap';

@@ -15,9 +15,11 @@ import {
   isContainer,
   moveOps,
   selectableAt,
+  snapMoveRect,
   subtreeSet,
   toFlowOps,
   topLevelSelection,
+  union,
   type ChildBox,
   type Rect,
 } from '@crunch/canvas';
@@ -25,8 +27,9 @@ import type { Breakpoint, DesignDoc, DesignSystemSpec, DocOp } from '@crunch/doc
 import type { DocStore } from '../doc-store';
 import { editBreakpointFor, type CanvasStore } from './canvas-store';
 import { frameIndex } from './context';
-import { flowOf, hitFromPoint, nodeElement, type Hit } from './dom';
+import { flowOf, hitFromPoint, nodeElement, worldRect, type Hit } from './dom';
 import { startGesture } from './gesture';
+import { SNAP_PX, snapTargets } from './guides';
 
 export interface DragCtx {
   docStore: DocStore;
@@ -137,6 +140,8 @@ export function startNodeDrag(ctx: DragCtx, down: PointerEvent, hit: Hit): boole
   const absolute = down.altKey || dragIds.every((id) => doc0.nodes[id]!.positioning === 'absolute');
   let target: FlowTarget | null = null;
   let delta = { x: 0, y: 0 };
+  let startBounds: Rect | null = null;
+  let others: Rect[] = [];
 
   const restore = () => {
     for (const el of draggedEls) {
@@ -155,11 +160,28 @@ export function startNodeDrag(ctx: DragCtx, down: PointerEvent, hit: Hit): boole
       onStart: () => {
         canvas.getState().setGesture('drag');
         if (!absolute) for (const el of draggedEls) el.style.setProperty('opacity', '0.35');
+        else {
+          // Smart guides for free placement: the selection's bounds against siblings and parent.
+          const cam = canvas.getState().camera;
+          startBounds = union(draggedEls.map((el) => worldRect(ctx.viewport, el, cam)));
+          others = snapTargets(ctx.viewport, cam, doc0, hit.frameId, dragIds);
+        }
       },
       onMove: (e, dx, dy) => {
         if (absolute) {
           const z = canvas.getState().camera.z;
-          delta = { x: Math.round(dx / z), y: Math.round(dy / z) };
+          delta = { x: dx / z, y: dy / z };
+          if (startBounds && !(e.metaKey || e.ctrlKey)) {
+            const moved = {
+              ...startBounds,
+              x: startBounds.x + delta.x,
+              y: startBounds.y + delta.y,
+            };
+            const s = snapMoveRect(moved, others, SNAP_PX / z);
+            delta = { x: s.rect.x - startBounds.x, y: s.rect.y - startBounds.y };
+            canvas.getState().setGuides(s.lines.length ? { lines: s.lines } : null);
+          }
+          delta = { x: Math.round(delta.x), y: Math.round(delta.y) };
           for (const el of draggedEls)
             el.style.setProperty('translate', `${delta.x}px ${delta.y}px`);
           canvas.getState().bumpLayout();
