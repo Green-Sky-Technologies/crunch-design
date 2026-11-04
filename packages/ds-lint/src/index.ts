@@ -26,6 +26,7 @@ import {
   type DesignSystemSpec,
   type DocOp,
   type Node,
+  type ResponsiveStyle,
   type StylePropName,
   type TokenKind,
 } from '@crunch/doc-model';
@@ -373,6 +374,104 @@ const PROPS_FOR_CONTRAST: StylePropName[] = [
   'display',
 ];
 
+/**
+ * What contrast walks: a doc node, or a part of an expanded component instance. The expansion
+ * mirrors @crunch/renderer's expandInstance (variant styles merged, the instance's style on the
+ * root, text/hidden bindings applied, nested instances expanded), kept local so ds-lint stays a
+ * leaf package.
+ */
+interface Item {
+  node: Node;
+  style: ResponsiveStyle;
+  hidden: boolean;
+  /** Doc node the issue is reported on (the instance, for its parts). */
+  docId: string;
+  /** Unique per rendered element. */
+  key: string;
+  /** "Button › Label" for instance parts. */
+  part?: string;
+  kids: () => Item[];
+}
+
+const MAX_INSTANCE_DEPTH = 8;
+
+function mergeStyle(a: ResponsiveStyle, b: ResponsiveStyle): ResponsiveStyle {
+  return {
+    base: { ...a.base, ...b.base },
+    md: a.md || b.md ? { ...a.md, ...b.md } : undefined,
+    lg: a.lg || b.lg ? { ...a.lg, ...b.lg } : undefined,
+  };
+}
+
+function docItem(doc: DesignDoc, ds: DesignSystemSpec, node: Node): Item {
+  if (node.type === 'instance') return instanceItem(ds, node, node.style, node.id, node.id, [], 0);
+  return {
+    node,
+    style: node.style,
+    hidden: !!node.hidden,
+    docId: node.id,
+    key: node.id,
+    kids: () =>
+      node.children.flatMap((c) => {
+        const n = doc.nodes[c];
+        return n ? [docItem(doc, ds, n)] : [];
+      }),
+  };
+}
+
+function instanceItem(
+  ds: DesignSystemSpec,
+  inst: Extract<Node, { type: 'instance' }>,
+  instStyle: ResponsiveStyle,
+  docId: string,
+  key: string,
+  trail: string[],
+  depth: number,
+): Item {
+  const comp = ds.components[inst.componentRef.componentId];
+  // Missing components are reported by checkNode; nothing to measure here.
+  if (!comp || depth > MAX_INSTANCE_DEPTH)
+    return { node: inst, style: instStyle, hidden: true, docId, key, kids: () => [] };
+  const variant: Record<string, string> = {};
+  for (const [axis, v] of Object.entries(comp.variants))
+    variant[axis] = inst.componentRef.variant[axis] ?? v.default;
+  const propValue = (name: string) => inst.props.values[name] ?? comp.props[name]?.default;
+  const names = [...trail, comp.name];
+
+  const build = (partId: string, isRoot: boolean): Item => {
+    const part = comp.nodes[partId]!;
+    let style = part.style;
+    for (const vs of comp.variantStyles)
+      if (vs.nodeId === partId && Object.entries(vs.when).every(([k, v]) => variant[k] === v))
+        style = mergeStyle(style, vs.style);
+    if (isRoot) style = mergeStyle(style, instStyle);
+    let node: Node = part;
+    if (part.type === 'text' && part.bind?.text) {
+      const v = propValue(part.bind.text);
+      if (v !== undefined) node = { ...part, props: { ...part.props, text: String(v) } };
+    }
+    const hidden =
+      (part.bind?.hidden ? propValue(part.bind.hidden) === false : false) ||
+      !!part.hidden ||
+      (isRoot && !!inst.hidden);
+    const partKey = `${key}-${partId}`;
+    if (node.type === 'instance') {
+      const nested = instanceItem(ds, node, style, docId, partKey, names, depth + 1);
+      return { ...nested, hidden: nested.hidden || hidden };
+    }
+    return {
+      node,
+      style,
+      hidden,
+      docId,
+      key: partKey,
+      part: `${names.join(' › ')} › ${part.name ?? partId}`,
+      kids: () => part.children.map((c) => build(c, false)),
+    };
+  };
+  return build(comp.rootNodeId, true);
+}
+
 function contrastPass(
   ctx: Ctx,
   bp: Breakpoint,
@@ -380,12 +479,13 @@ function contrastPass(
   base: Inherited,
   seen: Map<string, string>,
 ) {
-  const { doc, out } = ctx;
-  const stack: [Node, Inherited][] = [[root, base]];
+  const { out } = ctx;
+  const stack: [Item, Inherited][] = [[docItem(ctx.doc, ctx.ds, root), base]];
   while (stack.length) {
-    const [node, inh] = stack.pop()!;
-    if (node.hidden) continue;
-    const at = (p: StylePropName) => resolveAt(node.style, p, bp).value;
+    const [item, inh] = stack.pop()!;
+    const { node } = item;
+    if (item.hidden) continue;
+    const at = (p: StylePropName) => resolveAt(item.style, p, bp).value;
     if (at('display') === 'none') continue;
 
     const next: Inherited = { ...inh };
@@ -406,7 +506,7 @@ function contrastPass(
     }
 
     if (node.type === 'text' && node.props.text.trim() && next.bg && next.fg.a > 0) {
-      if (!ctx.only || ctx.only.has(node.id)) {
+      if (!ctx.only || ctx.only.has(item.docId)) {
         const color = next.fg.a >= 1 ? next.fg : over(next.fg, next.bg);
         const ratio = contrast(color, next.bg);
         const large = next.fontPx >= 24 || (next.fontPx >= 18.66 && next.weight >= 700);
@@ -414,14 +514,15 @@ function contrastPass(
         if (ratio < min) {
           const key = `${hex(color)}|${hex(next.bg)}|${min}`;
           // md/lg passes only report what differs from base.
-          if (seen.get(node.id) !== key) {
-            seen.set(node.id, key);
-            const fix = contrastFix(ctx, node, bp, color, next.bg, min);
+          if (seen.get(item.key) !== key) {
+            seen.set(item.key, key);
+            // Instance parts live in the design system, so there's no doc-level fix for them.
+            const fix = item.part ? undefined : contrastFix(ctx, node, bp, color, next.bg, min);
             out.push({
               code: 'contrast',
               severity: 'error',
-              message: `Text contrast ${ratio.toFixed(2)}:1 is below WCAG AA ${min}:1 (${hex(color)} on ${hex(next.bg)}${large ? ', large text' : ''})`,
-              nodeId: node.id,
+              message: `${item.part ? `${item.part}: t` : 'T'}ext contrast ${ratio.toFixed(2)}:1 is below WCAG AA ${min}:1 (${hex(color)} on ${hex(next.bg)}${large ? ', large text' : ''})`,
+              nodeId: item.docId,
               prop: 'color',
               breakpoint: bp,
               ...(fix ? { fix } : {}),
@@ -430,10 +531,8 @@ function contrastPass(
         }
       }
     }
-    for (let i = node.children.length - 1; i >= 0; i--) {
-      const c = doc.nodes[node.children[i]!];
-      if (c) stack.push([c, next]);
-    }
+    const kids = item.kids();
+    for (let i = kids.length - 1; i >= 0; i--) stack.push([kids[i]!, next]);
   }
 }
 

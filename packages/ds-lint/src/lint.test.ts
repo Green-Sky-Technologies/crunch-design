@@ -205,6 +205,41 @@ describe('lintDoc', () => {
     expect(lintDoc(fixed, ds).filter((i) => i.code === 'contrast')).toEqual([]);
   });
 
+  it('checks contrast inside component instances', () => {
+    const doc = docOf({ backgroundColor: '#ffffff' }, [
+      { id: 'n_c00000001', type: 'instance' }, // primary Button
+      {
+        id: 'n_b00000001',
+        style: { backgroundColor: '#18181b' },
+        kids: [
+          {
+            id: 'n_c00000002',
+            type: 'instance',
+            extra: {
+              componentRef: { componentId: 'Button', variant: { variant: 'secondary' } },
+            } as Partial<Node>,
+          },
+        ],
+      },
+    ]);
+    // Starter primary (#4f46e5) with white text passes; the secondary variant's dark label on a
+    // dark section fails.
+    const issues = lintDoc(doc, ds).filter((i) => i.code === 'contrast');
+    expect(issues.map((i) => i.nodeId)).toEqual(['n_c00000002']);
+    expect(issues[0]!.message).toMatch(/^Button › Label: text contrast/);
+    expect(issues[0]!.fix).toBeUndefined();
+
+    // A too-light primary makes the white label fail on every primary instance.
+    const light = starterDesignSystem();
+    light.tokens['color.primary'] = { type: 'color', value: '#a5b4fc' };
+    const primary = docOf({}, [{ id: 'n_c00000001', type: 'instance' }]);
+    expect(lintDoc(primary, light).map((i) => [i.code, i.nodeId])).toEqual([
+      ['contrast', 'n_c00000001'],
+    ]);
+    // nodeIds scoping applies to the instance.
+    expect(lintDoc(primary, light, { nodeIds: ['n_root00001'] })).toEqual([]);
+  });
+
   it('reports contrast per breakpoint and per theme', () => {
     const doc = docOf({}, [
       {
