@@ -65,7 +65,9 @@ jobs:
   e2e:
     needs: check
     runs-on: ubuntu-latest
-    # Needs a Clerk development instance; skipped until the secrets are configured.
+    # Signed-out smoke tests plus the app suite (e2e/app): real Clerk sign-in, roles, workspaces.
+    # Needs a Clerk *development* instance (pk_test_/sk_test_); skipped until the secrets are
+    # configured. The suite creates its own users and orgs per run and deletes them afterwards.
     if: ${{ vars.E2E_ENABLED == 'true' }}
     env:
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY_TEST }}
@@ -89,3 +91,18 @@ jobs:
       - run: pnpm --filter @crunch/web exec playwright install --with-deps
       - run: pnpm --filter @crunch/web build
       - run: pnpm --filter @crunch/web e2e
+      - run: pnpm --filter @crunch/web e2e:app
+        env:
+          E2E_SKIP_BUILD: '1'
+      # The teardown project normally deletes the run's Clerk users and orgs; if the run was
+      # cancelled or crashed first, delete what it recorded.
+      - if: cancelled() || failure()
+        run: pnpm exec tsx apps/web/e2e/app/cleanup.ts
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-app-report
+          path: |
+            apps/web/playwright-report
+            apps/web/test-results/e2e-app
+          retention-days: 7

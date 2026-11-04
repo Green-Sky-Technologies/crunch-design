@@ -63,12 +63,24 @@ pnpm dev                       # http://localhost:3000
 | `pnpm lint` / `pnpm typecheck` / `pnpm test` | Checks across all packages (via Turborepo)                     |
 | `pnpm build`                                 | Production build                                               |
 | `pnpm --filter @crunch/web e2e`              | Playwright on Chromium, Firefox and WebKit (needs Clerk keys)  |
+| `pnpm --filter @crunch/web e2e:app`          | Signed-in app suite: real Clerk users, roles and workspaces    |
 | `pnpm db:generate`                           | Generate a migration after editing `packages/db/src/schema.ts` |
 | `pnpm db:migrate`                            | Apply migrations to `DATABASE_URL`                             |
 | `pnpm keygen [id]`                           | New credential master key                                      |
 
 Integration tests use `TEST_DATABASE_URL` (default `postgres://crunch:crunch@localhost:5433/crunch_test`).
 The test database is created and migrated automatically.
+
+### End-to-end tests against the real app
+
+`pnpm --filter @crunch/web e2e:app` builds the app, starts it on port 3200 (`E2E_PORT`) and drives
+it with real Clerk sign-ins (`e2e/app`). It needs Clerk **development** keys (`pk_test_`/`sk_test_`)
+and `CREDENTIALS_MASTER_KEYS` in `apps/web/.env.local` (or the environment), and a migrated
+`DATABASE_URL` (use a database of its own, e.g. `crunch_e2e`). Each run creates its own users
+(`e2e+<role>-<runId>+clerk_test@example.com`), workspace and outsider org through the Clerk Backend
+API, and the teardown project deletes exactly those. If a run dies before teardown, the next run
+cleans it up, or run `pnpm exec tsx apps/web/e2e/app/cleanup.ts`. Set `E2E_SKIP_BUILD=1` to reuse
+an existing build.
 
 ## Roles
 

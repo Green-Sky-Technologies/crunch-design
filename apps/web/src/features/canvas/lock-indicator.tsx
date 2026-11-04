@@ -53,7 +53,7 @@ function Avatars({ state }: { state: LockState }) {
 }
 
 export function EditLockIndicator() {
-  const { can, user } = useEditor();
+  const { can, user, project } = useEditor();
   const readOnly = useDocStore((s) => s.readOnly);
   const reason = useDocStore((s) => s.readOnlyReason);
   const lock = useEditLock();
@@ -65,7 +65,14 @@ export function EditLockIndicator() {
   return (
     <div className="relative flex items-center gap-2 text-xs" data-testid="edit-lock">
       {state && state.presence.length > 0 && <Avatars state={state} />}
-      {!canEdit ? (
+      {project.archived ? (
+        <span
+          className="rounded-full bg-surface-2 px-2 py-0.5 text-muted"
+          title="This project is archived. Restore it from the projects page to edit it."
+        >
+          Archived
+        </span>
+      ) : !canEdit ? (
         <span className="rounded-full bg-surface-2 px-2 py-0.5 text-muted">View only</span>
       ) : readOnly && reason === 'locked' ? (
         <>

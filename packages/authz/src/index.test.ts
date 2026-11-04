@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { assertCan, can, ForbiddenError, PERMISSIONS, roleFromClerk } from './index';
+import {
+  ARCHIVED_PROJECT_BLOCKED,
+  assertCan,
+  can,
+  ForbiddenError,
+  PERMISSIONS,
+  permissionsFor,
+  permissionsForProject,
+  roleFromClerk,
+} from './index';
 
 describe('role matrix', () => {
   it('viewers are strictly view-only but can run deterministic exports', () => {
@@ -34,6 +43,18 @@ describe('role matrix', () => {
     expect(roleFromClerk('org:viewer')).toBe('viewer');
     expect(roleFromClerk('org:billing')).toBe('viewer');
     expect(roleFromClerk(undefined)).toBe('viewer');
+  });
+
+  it('archived projects are read-only for every role until restored', () => {
+    for (const role of ['admin', 'editor', 'viewer'] as const) {
+      const archived = permissionsForProject(role, { archived: true });
+      for (const p of ARCHIVED_PROJECT_BLOCKED) expect(archived, `${role} ${p}`).not.toContain(p);
+      expect(archived).toContain('project:read');
+      expect(archived).toContain('export:deterministic');
+      expect(permissionsForProject(role, { archived: false })).toEqual(permissionsFor(role));
+    }
+    expect(permissionsForProject('editor', { archived: true })).toContain('share:manage');
+    expect(permissionsForProject('editor', { archived: true })).toContain('project:update');
   });
 
   it('assertCan throws ForbiddenError', () => {

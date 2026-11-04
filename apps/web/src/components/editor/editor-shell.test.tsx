@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { permissionsFor } from '@crunch/authz';
+import { permissionsForProject } from '@crunch/authz';
 import { applyOps, initialDoc, starterDesignSystem, type DesignDoc } from '@crunch/doc-model';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
@@ -30,7 +30,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function setup(role: 'editor' | 'viewer') {
+function setup(role: 'editor' | 'viewer', archived = false) {
   let doc: DesignDoc = initialDoc();
   let version = 0;
   const commits: number[] = [];
@@ -51,10 +51,15 @@ function setup(role: 'editor' | 'viewer') {
       pollMs={1_000_000}
       initial={initial}
       info={{
-        project: { id: '00000000-0000-4000-8000-000000000001', name: 'Landing', description: null },
+        project: {
+          id: '00000000-0000-4000-8000-000000000001',
+          name: 'Landing',
+          description: null,
+          archived,
+        },
         workspace: { id: 'w', slug: 'acme', name: 'Acme' },
         user: { id: 'u', role },
-        permissions: permissionsFor(role),
+        permissions: permissionsForProject(role, { archived }),
         designSystem: { id: 'd', name: 'Starter', version: null, spec: starterDesignSystem() },
         agentAvailable: false,
       }}
@@ -104,5 +109,17 @@ describe('EditorShell', () => {
     expect(screen.getByText('View only')).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Undo' }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText(/You have view access/)).toBeTruthy();
+  });
+
+  it('archived projects open read-only, even for editors', async () => {
+    setup('editor', true);
+    await act(async () => {});
+    expect(screen.getByText('Archived')).toBeTruthy();
+    expect(screen.queryByText('View only')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Insert a sample design' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '+ Frame' })).toBeNull();
+    expect(screen.getByText(/This project is archived/)).toBeTruthy();
+    // Deterministic export stays available.
+    expect(screen.getByRole('button', { name: 'Export' })).toBeTruthy();
   });
 });

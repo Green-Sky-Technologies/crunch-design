@@ -76,6 +76,24 @@ export function permissionsFor(role: Role): Permission[] {
   return [...MATRIX[role]];
 }
 
+/**
+ * What an archived project refuses until it's restored (the services check `archivedAt` too):
+ * no design edits (so no agent runs or LLM exports, which edit or read through the agent) and no
+ * comments. Reading, deterministic exports and share links still work.
+ */
+export const ARCHIVED_PROJECT_BLOCKED: readonly Permission[] = [
+  'design:edit',
+  'design:comment',
+  'agent:run',
+  'export:llm',
+];
+
+/** The permissions a role has on one project, taking its archived state into account. */
+export function permissionsForProject(role: Role, project: { archived: boolean }): Permission[] {
+  const all = permissionsFor(role);
+  return project.archived ? all.filter((p) => !ARCHIVED_PROJECT_BLOCKED.includes(p)) : all;
+}
+
 export function roleFromClerk(orgRole: string | null | undefined): Role {
   switch (orgRole) {
     case 'org:admin':
