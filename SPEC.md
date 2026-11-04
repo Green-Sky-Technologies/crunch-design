@@ -7,8 +7,8 @@
 > persistent design system and exported to code (React + Tailwind) and to Figma.
 >
 > Written as epics + user stories with acceptance criteria (AC). Work top to
-> bottom; each epic is independently demoable. The original brief is preserved in
-> `SPEC.v0.md`. Decisions made during refinement are logged in §9.
+> bottom; each epic is independently demoable. Decisions made during refinement are
+> logged in §9.
 
 ---
 
