@@ -36,7 +36,10 @@ export interface CreateSandboxParams {
   resources: { vcpus: number };
   persistent: false;
   env: Record<string, string>;
-  networkPolicy: { allow: string[] };
+  /** Allowed egress hosts; the record form attaches header transforms at the firewall. */
+  networkPolicy: {
+    allow: string[] | Record<string, { transform: { headers: Record<string, string> }[] }[]>;
+  };
   tags: Record<string, string>;
 }
 
@@ -72,9 +75,34 @@ export interface VercelSandboxRunnerOptions {
   vcpus?: number;
   /** Extra hosts the sandbox may reach (the app host and npm are always allowed). */
   allowHosts?: string[];
+  /**
+   * Vercel "Protection Bypass for Automation" secret for a protected preview. It is injected as
+   * the x-vercel-protection-bypass header by the sandbox egress firewall on requests to the app
+   * host only, so it never enters the VM (credential brokering).
+   */
+  protectionBypassSecret?: string;
 }
 
 const LIVE_STATUSES = new Set(['pending', 'running']);
+
+export function networkPolicyFor(
+  appHost: string,
+  extraHosts: string[],
+  bypassSecret?: string,
+): CreateSandboxParams['networkPolicy'] {
+  const hosts = [appHost, 'registry.npmjs.org', ...extraHosts];
+  if (!bypassSecret) return { allow: hosts };
+  return {
+    allow: Object.fromEntries(
+      hosts.map((h) => [
+        h,
+        h === appHost
+          ? [{ transform: [{ headers: { 'x-vercel-protection-bypass': bypassSecret } }] }]
+          : [],
+      ]),
+    ) as CreateSandboxParams['networkPolicy']['allow'],
+  };
+}
 
 export class VercelSandboxRunner implements JobRunner {
   private apiPromise: Promise<SandboxApi> | null = null;
@@ -115,7 +143,11 @@ export class VercelSandboxRunner implements JobRunner {
       resources: { vcpus: this.opts.vcpus ?? 2 },
       persistent: false,
       env,
-      networkPolicy: { allow: [appHost, 'registry.npmjs.org', ...(this.opts.allowHosts ?? [])] },
+      networkPolicy: networkPolicyFor(
+        appHost,
+        this.opts.allowHosts ?? [],
+        this.opts.protectionBypassSecret,
+      ),
       tags: { crunchJob: job.jobId, workspace: job.workspaceId },
     });
     try {

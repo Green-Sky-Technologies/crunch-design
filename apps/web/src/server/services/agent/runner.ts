@@ -61,13 +61,20 @@ export async function prepareJob(db: Db, job: StartJob): Promise<PreparedJob> {
   };
 }
 
-export function appUrl(): string {
-  const explicit = process.env.CRUNCH_APP_URL;
-  if (explicit) return explicit;
-  const vercel = process.env.VERCEL_PROJECT_PRODUCTION_URL ?? process.env.VERCEL_URL;
-  if (vercel) return `https://${vercel}`;
-  return `http://localhost:${process.env.PORT ?? 3000}`;
+/**
+ * Base URL sandboxes call back to (LLM proxy, job API). CRUNCH_APP_URL wins. Otherwise a preview
+ * deployment calls back to itself (VERCEL_URL), never to production; production uses its
+ * production URL.
+ */
+export function appUrl(env: Record<string, string | undefined> = process.env): string {
+  if (env.CRUNCH_APP_URL) return env.CRUNCH_APP_URL.replace(/\/+$/, '');
+  if (env.VERCEL_ENV === 'production' && env.VERCEL_PROJECT_PRODUCTION_URL)
+    return `https://${env.VERCEL_PROJECT_PRODUCTION_URL}`;
+  if (env.VERCEL_URL) return `https://${env.VERCEL_URL}`;
+  return `http://localhost:${env.PORT ?? 3000}`;
 }
+
+const bypass = () => process.env.VERCEL_AUTOMATION_BYPASS_SECRET || undefined;
 
 const g = globalThis as unknown as { __crunchJobRunner?: JobRunner };
 
@@ -77,10 +84,12 @@ export function jobRunner(db: Db, opts: { api?: SandboxApi } = {}): JobRunner {
     return new VercelSandboxRunner({
       appUrl: appUrl(),
       api: opts.api,
+      protectionBypassSecret: bypass(),
       prepare: (j) => prepareJob(db, j),
     });
   return (g.__crunchJobRunner ??= new VercelSandboxRunner({
     appUrl: appUrl(),
+    protectionBypassSecret: bypass(),
     prepare: (j) => prepareJob(db, j),
   }));
 }
